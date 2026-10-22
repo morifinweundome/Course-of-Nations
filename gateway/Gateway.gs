@@ -1,0 +1,172 @@
+/**
+ * Course of Nations: workbook gateway (Starverse Infinitas).
+ *
+ * Add this file to the workbook's Apps Script project, beside the existing
+ * engine code. Deploy as a web app: Execute as "Me", access "Anyone".
+ * Set the Script Property GATEWAY_KEY (Project Settings -> Script Properties)
+ * to the same value as the game's gateway key in Cloudflare.
+ *
+ * Actions (POST, JSON body, always with "key"):
+ *   whoami  {discordId}                         -> {ok, nation, nationId}
+ *   view    {discordId}                         -> {ok, nation, turn, deadline, tabs}
+ *   submit  {discordId, submittedBy, orders}    -> {ok, row}
+ *   command {command: Prepare|Resolve|Refresh}  -> {ok, queued}
+ *
+ * Secrecy: the nation is always looked up from the Discord ID on the Players
+ * tab. A caller can never name the nation it wants to see.
+ */
+
+var GW = {
+  PLAYERS: 'Players',            // A: Discord ID, B: Nation ID, C: Role, D: Note
+  NATIONS: 'Nations',
+  CONTROL: 'Control',
+  FORMS: 'Forms',
+  SUBMISSIONS: 'Order submissions',
+  COMMANDS: { Prepare: 'Prepare', Resolve: 'Resolve', Refresh: 'Refresh player sheets' }
+};
+
+function doPost(e) {
+  var req;
+  try {
+    req = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return gwReply_({ ok: false, error: 'Bad request' });
+  }
+  var key = PropertiesService.getScriptProperties().getProperty('GATEWAY_KEY');
+  if (!key || req.key !== key) return gwReply_({ ok: false, error: 'Refused' });
+
+  try {
+    switch (req.action) {
+      case 'whoami':  return gwReply_(gwWhoami_(req.discordId));
+      case 'view':    return gwReply_(gwView_(req.discordId));
+      case 'submit':  return gwReply_(gwSubmit_(req.discordId, req.submittedBy, req.orders));
+      case 'command': return gwReply_(gwCommand_(req.command));
+      default:        return gwReply_({ ok: false, error: 'Unknown action' });
+    }
+  } catch (err) {
+    return gwReply_({ ok: false, error: 'Gateway error: ' + err.message });
+  }
+}
+
+function doGet() {
+  return gwReply_({ ok: true, service: 'Course of Nations gateway' });
+}
+
+function gwReply_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---- Lookups ----
+
+function gwPlayer_(discordId) {
+  if (!discordId) return null;
+  var sh = SpreadsheetApp.getActive().getSheetByName(GW.PLAYERS);
+  if (!sh) return null;
+  var rows = sh.getDataRange().getDisplayValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === String(discordId)) {
+      return { nationId: String(rows[i][1]).trim(), role: String(rows[i][2]).trim() || 'Player' };
+    }
+  }
+  return null;
+}
+
+function gwNation_(nationId) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(GW.NATIONS);
+  var rows = sh.getDataRange().getDisplayValues();
+  var head = rows[0];
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i][0] === nationId) {
+      var rec = {};
+      head.forEach(function (h, j) { rec[h] = rows[i][j]; });
+      return rec;
+    }
+  }
+  return null;
+}
+
+function gwTurn_() {
+  return SpreadsheetApp.getActive().getSheetByName(GW.CONTROL).getRange('B8').getDisplayValue();
+}
+
+function gwDeadline_() {
+  var rows = SpreadsheetApp.getActive().getSheetByName(GW.FORMS).getDataRange().getDisplayValues();
+  for (var i = 0; i < rows.length; i++) if (rows[i][0] === 'Deadline') return rows[i][1];
+  return '';
+}
+
+// ---- Actions ----
+
+function gwWhoami_(discordId) {
+  var p = gwPlayer_(discordId);
+  if (!p) return { ok: true, nation: null };
+  var n = gwNation_(p.nationId);
+  return { ok: true, nation: n ? n['Nation'] : null, nationId: p.nationId, role: p.role };
+}
+
+function gwView_(discordId) {
+  var p = gwPlayer_(discordId);
+  if (!p) return { ok: false, error: 'Not enrolled in this game' };
+  var n = gwNation_(p.nationId);
+  if (!n) return { ok: false, error: 'Nation not found' };
+  var feedId = n['Private feed'];
+  if (!feedId) return { ok: false, error: 'No player record yet' };
+
+  var feed = SpreadsheetApp.openById(feedId);
+  var tabs = {};
+  feed.getSheets().forEach(function (s) {
+    if (s.getLastRow() === 0) return;
+    tabs[s.getName()] = s.getDataRange().getDisplayValues();
+  });
+  return {
+    ok: true,
+    nation: n['Nation'],
+    nationId: p.nationId,
+    turn: gwTurn_(),
+    deadline: gwDeadline_(),
+    tabs: tabs
+  };
+}
+
+function gwSubmit_(discordId, submittedBy, orders) {
+  var p = gwPlayer_(discordId);
+  if (!p) return { ok: false, error: 'Not enrolled in this game' };
+  if (!orders || !orders.length) return { ok: false, error: 'No orders' };
+  var n = gwNation_(p.nationId);
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Busy, try again' };
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(GW.SUBMISSIONS);
+    var width = sh.getLastColumn();
+    var row = new Array(width).fill('');
+    row[0] = new Date();
+    row[1] = n['Nation'];
+    row[2] = n['Order serial'];
+    row[3] = orders.map(String).join('\n');
+    row[4] = 'No';
+    if (width >= 36) row[35] = 'Submitted on the site by ' + (submittedBy || discordId);
+    sh.appendRow(row);
+    return { ok: true, row: sh.getLastRow(), turn: gwTurn_() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function gwCommand_(command) {
+  var text = GW.COMMANDS[command];
+  if (!text) return { ok: false, error: 'Unknown command' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Busy, try again' };
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(GW.CONTROL);
+    sh.getRange('B3').setValue(text);
+    sh.getRange('B4').setValue(new Date());
+    // For now the existing poller picks the command up within a minute.
+    // Once the engine's entry points are wired in here, it will run at once.
+    return { ok: true, queued: true, command: text };
+  } finally {
+    lock.releaseLock();
+  }
+}
