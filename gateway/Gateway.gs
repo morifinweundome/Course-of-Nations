@@ -10,7 +10,9 @@
  *   whoami  {discordId}                         -> {ok, nation, nationId}
  *   view    {discordId}                         -> {ok, nation, turn, deadline, tabs}
  *   submit  {discordId, submittedBy, orders}    -> {ok, row}
- *   command {command: Prepare|Resolve|Refresh}  -> {ok, queued}
+ *   command {command: Prepare|Resolve|Refresh}  -> {ok, ran, status, result}
+ *     Writes the command to Control!B3 and runs the engine's pollControl()
+ *     at once. Keep the timed poller slow (30 min) so the two never collide.
  *
  * Secrecy: the nation is always looked up from the Discord ID on the Players
  * tab. A caller can never name the nation it wants to see.
@@ -161,10 +163,26 @@ function gwCommand_(command) {
   if (!lock.tryLock(10000)) return { ok: false, error: 'Busy, try again' };
   try {
     var sh = SpreadsheetApp.getActive().getSheetByName(GW.CONTROL);
+    var status = String(sh.getRange('B5').getDisplayValue());
+    if (/running|working|in progress/i.test(status)) {
+      return { ok: false, error: 'A command is already running: ' + status };
+    }
     sh.getRange('B3').setValue(text);
     sh.getRange('B4').setValue(new Date());
-    // For now the existing poller picks the command up within a minute.
-    // Once the engine's entry points are wired in here, it will run at once.
+    SpreadsheetApp.flush();
+    // Run it now through the engine's own Control handler, rather than
+    // waiting for the timed poller to notice it.
+    if (typeof pollControl === 'function') {
+      pollControl();
+      SpreadsheetApp.flush();
+      return {
+        ok: true,
+        ran: true,
+        command: text,
+        status: sh.getRange('B5').getDisplayValue(),
+        result: sh.getRange('B6').getDisplayValue()
+      };
+    }
     return { ok: true, queued: true, command: text };
   } finally {
     lock.releaseLock();
