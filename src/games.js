@@ -7,7 +7,7 @@ export const GAMES = [
     id: "starverse-sandbox",
     title: "Starverse Infinitas (sandbox)",
     tagline: "Young interstellar civilisations in an uncharted galaxy.",
-    gateway: "", // Apps Script web app URL, filled in once deployed
+    gateway: "https://script.google.com/macros/s/AKfycbwV-IdbyShx4_wFZ0ABKpNpiXxDg8o3qnULFyTQZJaFH1-2-AvvOs3geZeoVEy0notnZA/exec",
     keySecret: "GATEWAY_KEY_STARVERSE_SANDBOX",
     timezone: "Asia/Singapore",
   },
