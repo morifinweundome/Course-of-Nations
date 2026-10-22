@@ -9,5 +9,5 @@ run_worker_first = ["/api/*", "/auth/*"]
 
 [vars]
 # Public values. Secrets are set in the Cloudflare dashboard (see README).
-DISCORD_CLIENT_ID = ""
+DISCORD_CLIENT_ID = "1562736109975371796"
 GM_DISCORD_IDS = "455548512277364737"
