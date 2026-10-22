@@ -10,6 +10,9 @@
  *   whoami  {discordId}                         -> {ok, nation, nationId}
  *   view    {discordId}                         -> {ok, nation, turn, deadline, tabs}
  *   submit  {discordId, submittedBy, orders}    -> {ok, row}
+ *   chart   {}                                  -> {ok, chart, lanes}
+ *     The public star chart (as the Standings book's Star Chart and Hyperlanes):
+ *     charted systems in full, uncharted ones as position only.
  *   command {command: Prepare|Resolve|Refresh}  -> {ok, ran, status, result}
  *     Writes the command to Control!B3 and runs the engine's pollControl()
  *     at once. Keep the timed poller slow (30 min) so the two never collide.
@@ -42,6 +45,7 @@ function doPost(e) {
       case 'whoami':  return gwReply_(gwWhoami_(req.discordId));
       case 'view':    return gwReply_(gwView_(req.discordId));
       case 'submit':  return gwReply_(gwSubmit_(req.discordId, req.submittedBy, req.orders, req));
+      case 'chart':   return gwReply_(gwChart_());
       case 'command': return gwReply_(gwCommand_(req.command));
       default:        return gwReply_({ ok: false, error: 'Unknown action' });
     }
@@ -205,4 +209,31 @@ function gwCommand_(command) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/** The public star chart, built from Systems, Nations and Lanes. Only what the
+ *  Standings book shows everyone: uncharted systems give their position alone. */
+function gwChart_() {
+  var ss = SpreadsheetApp.getActive();
+  function table(name) {
+    var v = ss.getSheetByName(name).getDataRange().getDisplayValues();
+    var h = v[0].map(function (x) { return String(x).trim(); });
+    return v.slice(1).filter(function (r) { return String(r[0]).trim() !== ''; })
+      .map(function (r) { var o = {}; h.forEach(function (k, i) { o[k] = r[i]; }); return o; });
+  }
+  var nations = table(GW.NATIONS), byId = {}, slot = {};
+  nations.forEach(function (n, i) { byId[n['Nation ID']] = n['Nation']; slot[n['Nation ID']] = i + 1; });
+  var head = ['System ID', 'Sector', 'Gateway', 'Core link', 'x', 'y', 'Owner', 'Name', 'Charted', 'Class', 'Type', 'Life',
+              'Native era', 'Deposits', 'Feature', 'Environment', 'Colour', 'Owner ID'];
+  var rows = table('Systems').map(function (s) {
+    var charted = String(s['Discovered by'] || '').trim() !== '';
+    var oid = String(s['Owner'] || '').trim(), status = String(s['Status'] || '');
+    var owner = oid ? (byId[oid] || oid) : (/^Independent/i.test(status) ? 'Independent' : '');
+    var base = [s['System ID'], s['Sector'], s['Gateway'], s['Core link'], s['x'], s['y']];
+    if (!charted) return base.concat(['', '', 'No', '', '', '', '', '', '', '', '', '']);
+    return base.concat([owner, s['Name'], 'Yes', s['Class'], s['Type'], s['Life'], s['Native era'], s['Deposits'], s['Feature'],
+      s['Environment'], oid ? String(slot[oid] || '') : '', oid]);
+  });
+  var lanes = table('Lanes').map(function (l) { return [l['From'], l['To'], l['Kind'] || 'lane']; });
+  return { ok: true, chart: [head].concat(rows), lanes: [['From', 'To', 'Kind']].concat(lanes) };
 }

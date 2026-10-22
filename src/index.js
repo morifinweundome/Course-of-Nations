@@ -141,7 +141,7 @@ async function api(request, env, url) {
     return json({ games: list.filter(Boolean) });
   }
 
-  const m = path.match(/^\/api\/games\/([a-z0-9-]+)\/(view|submit|command)$/);
+  const m = path.match(/^\/api\/games\/([a-z0-9-]+)\/(view|submit|command|chart)$/);
   if (m) {
     const game = findGame(m[1]);
     if (!game) return json({ error: "No such game." }, 404);
@@ -157,6 +157,11 @@ async function api(request, env, url) {
 
     // The gateway resolves the player's nation from their Discord ID itself,
     // so a player can never ask for another nation's view.
+    // The public star chart of this game: what every player may see.
+    if (action === "chart") {
+      return json(await callGateway(game, env, { action: "chart" }));
+    }
+
     if (action === "view") {
       return json(await callGateway(game, env, { action: "view", discordId: user.id }));
     }

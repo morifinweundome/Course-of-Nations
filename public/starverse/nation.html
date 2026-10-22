@@ -749,8 +749,12 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     var o = $('#orders');
     o.href = '#write'; o.removeAttribute('target'); o.removeAttribute('aria-disabled');
     o.onclick = function (e) { e.preventDefault(); var t = document.querySelector('.tab[data-p="write"]'); if (t) { t.click(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+    // Both maps open the site's own map, which reads this game's chart; the private one adds your worlds.
+    var mapUrl = location.origin + '/starverse/map.html?game=' + encodeURIComponent(GAME);
+    var feedId = (String(kv('Private map link')).match(/feed=([\w-]+)/) || [])[1];
     var m = $('#pmap');
-    if (kv('Private map link')) { m.href = kv('Private map link'); m.removeAttribute('aria-disabled'); }
+    if (feedId) { m.href = mapUrl + '&feed=' + feedId; m.removeAttribute('aria-disabled'); }
+    $('#gmap').href = mapUrl; $('#mapNav').href = mapUrl;
   }
 
   var MAIN = ['Industry', 'Energy', 'Research', 'Influence'];
