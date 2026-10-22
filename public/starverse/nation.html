@@ -191,6 +191,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       <button class="btn" data-cmd="Prepare">Prepare</button>
       <button class="btn" data-cmd="Resolve">Resolve</button>
       <button class="btn" data-cmd="Refresh">Refresh player sheets</button>
+      <a class="btn" id="gmLink" href="#" target="con-gm">GM console</a>
       <span class="gmstatus" id="gmstatus"></span>
     </div>
 
@@ -199,6 +200,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       <button class="tab" role="tab" aria-selected="true" data-p="overview">Overview</button>
       <button class="tab" role="tab" aria-selected="false" data-p="plan">Plan the turn</button>
       <button class="tab" role="tab" aria-selected="false" data-p="write">Write orders</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="ask">Ask the GM<span class="n" id="nA"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="realm">Systems &amp; worlds<span class="n" id="nS"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="forces">Forces<span class="n" id="nF"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="state">State &amp; fiscal code</button>
@@ -323,6 +325,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <p class="note">Sending replaces any earlier submission for this turn. The order form remains available as a fallback: <a id="bkForm" target="_blank" rel="noopener">open the form</a>.</p>
       </div>
     </section>
+    <section id="p-ask" hidden>
+      <div class="group">
+        <h2>Ask the game master</h2>
+        <p class="note">Questions about the rules, an idea you want to try, or what an order would do. Answers usually come within half a day, and before the turn is prepared where time allows. Only you and the GM see your questions.</p>
+        <textarea class="bk-ta" id="askText" rows="4" placeholder="Could my scientists study whether..."></textarea>
+        <div class="bk-send"><button class="btn gold" type="button" id="askSend">Send question</button><span class="gmstatus" id="askStatus"></span></div>
+      </div>
+      <div class="group"><h2>Your questions</h2><div id="askList"></div></div>
+    </section>
 
   </div>
   <p class="foot">Lore decides who you are; your choices decide what you become.</p>
@@ -373,6 +384,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   fetch(location.origin + '/api/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (me) {
     if (!me || !me.gm) return;
     $('#gmbar').hidden = false;
+    $('#gmLink').href = location.origin + '/gm.html?game=' + encodeURIComponent(GAME);
     document.querySelectorAll('#gmbar button').forEach(function (b) {
       b.onclick = function () {
         var cmd = b.dataset.cmd;
@@ -707,6 +719,37 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       .catch(function () { $('#bkStatus').textContent = 'No answer from the server. Your draft is safe; try again shortly.'; })
       .then(function () { btn.disabled = false; });
   }
+
+  /* ---------- ask the GM ---------- */
+  function drawAsk(list) {
+    var open = list.filter(function (q) { return q.status !== 'Answered'; }).length;
+    var fresh = list.filter(function (q) { return q.status === 'Answered'; }).length;
+    $('#nA').textContent = list.length ? (open ? open + ' open' : '') : '';
+    $('#askList').innerHTML = list.length ? list.map(function (q) {
+      return '<div class="panel" style="margin-bottom:10px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><b>' + esc(q.id) + '</b>' +
+        '<span class="pill ' + (q.status === 'Answered' ? 'ok' : 'wait') + '">' + esc(q.status || 'Open') + '</span><span class="muted" style="font-size:13px">asked ' + esc(q.submitted) + '</span></div>' +
+        '<div style="white-space:pre-wrap">' + esc(q.question) + '</div>' +
+        (q.answer ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line2);white-space:pre-wrap"><span class="kicker">Answer</span><br>' + esc(q.answer) + '</div>' : '') + '</div>';
+    }).join('') : '<div class="none">You have not asked anything yet.</div>';
+  }
+  function loadAsk() {
+    fetch(API + '/inquiries', { credentials: 'same-origin' }).then(function (r) { return r.json(); })
+      .then(function (v) { if (v.ok) drawAsk(v.inquiries || []); }).catch(function () {});
+  }
+  document.addEventListener('click', function (e) {
+    if (e.target.id !== 'askSend') return;
+    var q = $('#askText').value.trim(), b = e.target;
+    if (!q) { $('#askStatus').textContent = 'Write your question first.'; return; }
+    b.disabled = true; $('#askStatus').textContent = 'Sending…';
+    fetch(API + '/ask', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) })
+      .then(function (r) { return r.json(); })
+      .then(function (v) {
+        if (!v.ok) { $('#askStatus').textContent = 'Not sent: ' + (v.error || 'error'); return; }
+        $('#askText').value = ''; $('#askStatus').textContent = 'Sent as ' + v.id + '. The answer will appear below.'; loadAsk();
+      })
+      .catch(function () { $('#askStatus').textContent = 'No answer from the server; try again shortly.'; })
+      .then(function () { b.disabled = false; });
+  });
 
   /* ---------- reading ---------- */
   function parseCSV(text) {
@@ -1084,7 +1127,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
         reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
         BK.sys = r[4]; BK.prices = priceRows; BK.plans = r[18] || []; BK.reach = r[9]; BK.forces = r[6]; bkInit();
-        loaded = true;
+        loaded = true; loadAsk();
         stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       })
       .catch(function (err) {
@@ -1097,7 +1140,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
       document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', x === t); });
-      ['overview', 'plan', 'write', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
+      ['overview', 'plan', 'write', 'ask', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
       history.replaceState(null, '', location.origin + location.pathname + location.search + (t.dataset.p === 'overview' ? '' : '#' + t.dataset.p));
     };
   });

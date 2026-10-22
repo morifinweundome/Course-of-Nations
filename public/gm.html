@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GM Console</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#05080D;--band1:#0C1420;--band2:#132033;--line:#2C4A68;--line2:#1B2D44;--text:#D3DEEA;--bright:#E8F0F8;--chrome:#B9D3EA;--steel:#8FB3D4;--muted:#7F95AB;--gold:#F2C76B;--up:#5FD38D;--down:#E58A8A}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 Lato,system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 80px}
+.kicker{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--steel);font-weight:700}
+h1{margin:4px 0 4px;font-size:clamp(26px,4vw,38px);color:var(--bright);font-weight:900}
+h2{font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--steel);margin:0 0 10px;font-weight:900}
+a{color:var(--steel)}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+.btn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:700;font-size:14px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:linear-gradient(180deg,#183050,#122640);color:var(--bright);cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--steel)}
+.btn.gold{border-color:#8a6a2a;background:linear-gradient(180deg,#3a2c0e,#261c08);color:#FBE7B5}
+.btn.red{border-color:#7a3434;color:#F3B5B5;background:linear-gradient(180deg,#2a1414,#1a0c0c)}
+.btn[disabled]{opacity:.5;cursor:wait}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border:1px dashed var(--line);border-radius:10px;margin-bottom:16px}
+.status{color:var(--muted);font-size:13px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line2);margin-bottom:16px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);font:inherit;font-weight:700;padding:8px 12px;cursor:pointer}
+.tab[aria-selected="true"]{color:var(--bright);border-color:var(--steel)}
+.n{margin-left:6px;font-size:12px;color:var(--gold)}
+.card{border:1px solid var(--line2);border-radius:12px;background:linear-gradient(180deg,var(--band1),rgba(12,20,32,.6));padding:14px 16px;margin-bottom:12px}
+.card .h{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.ref{font:700 12px/1 ui-monospace,monospace;color:var(--gold);border:1px solid #8a6a2a;border-radius:999px;padding:4px 9px}
+.who{font-weight:900;color:var(--bright)}
+.pill{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--chrome)}
+.pill.open{border-color:#8a6a2a;color:#FBE7B5}.pill.done{border-color:#2f6b4a;color:#9be3b8}
+.order{font:13px/1.5 ui-monospace,monospace;background:#0A111B;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;white-space:pre-wrap;color:var(--bright)}
+dl{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;margin:10px 0}
+dt{color:var(--muted);font-size:13px}dd{margin:0}
+textarea{width:100%;font:inherit;font-size:14px;color:var(--bright);background:#0A111B;border:1px solid var(--line);border-radius:8px;padding:8px 10px;resize:vertical;line-height:1.5}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:center}
+.none{border:1px dashed var(--line2);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-style:italic}
+.fil{display:flex;gap:6px;margin-bottom:12px}
+.fil button{font:inherit;font-size:13px;font-weight:700;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--band1);color:var(--chrome);cursor:pointer}
+.fil button[aria-pressed="true"]{border-color:var(--steel);color:var(--bright)}
+.gate{max-width:520px;margin:12vh auto;text-align:center}
+@media (max-width:640px){dl{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <div class="gate" id="gate" hidden><div class="kicker">Course of Nations</div><h1>GM only</h1><p id="gateText">Sign in with the game master's Discord account.</p><p><a class="btn" href="/">Go to Course of Nations</a></p></div>
+
+  <div id="app" hidden>
+    <div class="top">
+      <div><div class="kicker" id="kick">Game master</div><h1>GM Console</h1></div>
+      <a class="btn" id="back" href="#">Nation page</a>
+    </div>
+    <div class="bar">
+      <span class="kicker">Turn</span>
+      <button class="btn" data-cmd="Prepare">Prepare</button>
+      <button class="btn" data-cmd="Resolve">Resolve</button>
+      <button class="btn" data-cmd="Refresh">Refresh player sheets</button>
+      <button class="btn" id="reload">Reload desk</button>
+      <span class="status" id="cmdStatus"></span>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-p="rulings">Rulings<span class="n" id="nR"></span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="inq">Inquiries<span class="n" id="nQ"></span></button>
+    </div>
+
+    <section id="p-rulings">
+      <p class="status" id="rNote"></p>
+      <div id="rulings"></div>
+    </section>
+    <section id="p-inq" hidden>
+      <div class="fil" id="qFil"><button data-v="open" aria-pressed="true">Open</button><button data-v="all" aria-pressed="false">All</button></div>
+      <div id="inquiries"></div>
+    </section>
+  </div>
+</main>
+<script>
+(function () {
+  function $(s) { return document.querySelector(s); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  var GAME = 'starverse-sandbox';
+  try { var g = new URLSearchParams(location.search).get('game'); if (g && /^[a-z0-9-]+$/.test(g)) GAME = g; } catch (e) {}
+  var API = location.origin + '/api/games/' + GAME;
+  var RUL = [], INQ = [], qFilter = 'open';
+  $('#back').href = location.origin + '/starverse/nation.html?game=' + encodeURIComponent(GAME);
+
+  function post(path, body) {
+    return fetch(API + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+  }
+  function getj(path) { return fetch(API + path, { credentials: 'same-origin' }).then(function (r) { return r.json(); }); }
+
+  /* ---- rulings ---- */
+  function drawRulings(turn) {
+    var open = RUL.filter(function (r) { return !String(r.decision).trim() && r.status !== 'Settled'; }).length;
+    $('#nR').textContent = open || '';
+    $('#rNote').textContent = RUL.length ? 'Turn ' + turn + ': ' + RUL.length + ' ruling' + (RUL.length === 1 ? '' : 's') + ', ' + open + ' awaiting a decision. Resolve is refused while any is undecided.' : '';
+    $('#rulings').innerHTML = RUL.length ? RUL.map(function (r, i) {
+      var decided = String(r.decision).trim(), settled = r.status === 'Settled';
+      var a = r.action || {};
+      return '<div class="card" data-i="' + i + '"><div class="h"><span class="ref">' + esc(r.ref) + '</span><span class="who">' + esc(r.nation) + '</span>' +
+        '<span class="pill ' + (settled || decided ? 'done' : 'open') + '">' + (settled ? 'Settled' : decided ? 'Decided' : 'Awaiting decision') + '</span>' +
+        (a.channel ? '<span class="pill">' + esc(a.channel) + '</span>' : '') + '</div>' +
+        '<div class="order">' + esc(a.text || r.item) + '</div>' +
+        '<dl><dt>Why it needs a ruling</dt><dd>' + esc(r.why || a.flag || '') + '</dd>' +
+        (a.cost ? '<dt>Cost as prepared</dt><dd>' + esc(a.cost) + '</dd>' : '') +
+        (r.suggested ? '<dt>Suggested ruling</dt><dd>' + esc(r.suggested) + '</dd>' : '') + '</dl>' +
+        '<textarea rows="4" data-dec placeholder="Your ruling. Begin with Approve or Reject to let the engine apply or refuse the order; anything else is settled by hand.">' + esc(r.decision) + '</textarea>' +
+        '<div class="acts">' +
+          '<button class="btn gold" data-save="approve" ' + (settled ? 'disabled' : '') + '>Approve</button>' +
+          '<button class="btn red" data-save="reject" ' + (settled ? 'disabled' : '') + '>Reject</button>' +
+          '<button class="btn" data-save="other" ' + (settled ? 'disabled' : '') + '>Save ruling</button>' +
+          '<button class="btn" data-discuss>Discuss</button><span class="status" data-st></span></div></div>';
+    }).join('') : '<div class="none">No rulings for the turn being prepared. Press Prepare once orders are in.</div>';
+  }
+  function loadRulings() {
+    $('#rulings').innerHTML = '<div class="none">Reading the rulings…</div>';
+    return getj('/gm/rulings').then(function (v) {
+      if (!v.ok) { $('#rulings').innerHTML = '<div class="none">' + esc(v.error || 'Could not read the rulings') + '</div>'; return; }
+      RUL = v.rulings || []; drawRulings(v.turn);
+    }).catch(function () { $('#rulings').innerHTML = '<div class="none">No answer from the gateway. Try Reload desk.</div>'; });
+  }
+
+  /* ---- inquiries ---- */
+  function drawInq() {
+    var open = INQ.filter(function (q) { return q.Status !== 'Answered'; });
+    $('#nQ').textContent = open.length || '';
+    var list = qFilter === 'open' ? open : INQ;
+    $('#inquiries').innerHTML = list.length ? list.map(function (q) {
+      var i = INQ.indexOf(q), done = q.Status === 'Answered';
+      return '<div class="card" data-q="' + i + '"><div class="h"><span class="ref">' + esc(q.ID) + '</span><span class="who">' + esc(q.Nation) + '</span>' +
+        '<span class="pill ' + (done ? 'done' : 'open') + '">' + esc(q.Status || 'Open') + '</span><span class="status">asked by ' + esc(q['Asked by']) + ' · ' + esc(q.Submitted) + ' · turn ' + esc(q.Turn) + '</span></div>' +
+        '<div class="order">' + esc(q.Question) + '</div>' +
+        (q['Suggested answer'] && !done ? '<dl><dt>Suggested answer</dt><dd>' + esc(q['Suggested answer']) + '</dd></dl>' : '') +
+        '<textarea rows="4" data-ans placeholder="Your answer to the player">' + esc(done ? q.Answer : (q['Suggested answer'] || '')) + '</textarea>' +
+        '<div class="acts"><button class="btn gold" data-answer>' + (done ? 'Update answer' : 'Send answer') + '</button><button class="btn" data-qdiscuss>Discuss</button><span class="status" data-st></span></div></div>';
+    }).join('') : '<div class="none">' + (qFilter === 'open' ? 'No open questions.' : 'No questions yet.') + '</div>';
+  }
+  function loadInq() {
+    return getj('/gm/inquiries').then(function (v) { INQ = v.ok ? (v.inquiries || []) : []; drawInq(); }).catch(function () {});
+  }
+
+  function copy(text, st) {
+    var done = function () { st.textContent = 'Copied. Paste it to Claude to discuss.'; };
+    try { navigator.clipboard.writeText(text).then(done, function () { st.textContent = text; }); } catch (e) { st.textContent = text; }
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target, card = t.closest && t.closest('.card');
+    if (t.dataset && t.dataset.save && card) {
+      var r = RUL[+card.dataset.i], ta = card.querySelector('[data-dec]'), st = card.querySelector('[data-st]');
+      var txt = ta.value.trim() || r.suggested || '';
+      if (t.dataset.save === 'approve' && !/^approve/i.test(txt)) txt = 'Approve' + (txt ? ': ' + txt : '');
+      if (t.dataset.save === 'reject' && !/^reject/i.test(txt)) txt = 'Reject' + (txt ? ': ' + txt : '');
+      if (!txt) { st.textContent = 'Write a ruling first.'; return; }
+      st.textContent = 'Saving…';
+      post('/gm/decide', { row: r.row, decision: txt }).then(function (v) {
+        if (!v.ok) { st.textContent = 'Not saved: ' + (v.error || 'error'); return; }
+        r.decision = txt; ta.value = txt; st.textContent = 'Saved.'; drawRulings((RUL[0] && RUL[0].ref.split('-')[1]) || '');
+      }).catch(function () { st.textContent = 'No answer; try again.'; });
+    }
+    if (t.dataset && t.dataset.discuss != null && card) {
+      var r2 = RUL[+card.dataset.i];
+      copy(r2.ref + ' (' + r2.nation + '): ' + ((r2.action && r2.action.text) || r2.item), card.querySelector('[data-st]'));
+    }
+    if (t.dataset && t.dataset.answer != null && card) {
+      var q = INQ[+card.dataset.q], ta2 = card.querySelector('[data-ans]'), st2 = card.querySelector('[data-st]');
+      if (!ta2.value.trim()) { st2.textContent = 'Write an answer first.'; return; }
+      st2.textContent = 'Sending…';
+      post('/gm/answer', { id: q.ID, answer: ta2.value.trim() }).then(function (v) {
+        if (!v.ok) { st2.textContent = 'Not sent: ' + (v.error || 'error'); return; }
+        q.Answer = ta2.value.trim(); q.Status = 'Answered'; drawInq();
+      }).catch(function () { st2.textContent = 'No answer; try again.'; });
+    }
+    if (t.dataset && t.dataset.qdiscuss != null && card) {
+      var q2 = INQ[+card.dataset.q];
+      copy(q2.ID + ' (' + q2.Nation + '): ' + q2.Question, card.querySelector('[data-st]'));
+    }
+    if (t.closest && t.closest('#qFil button')) {
+      qFilter = t.dataset.v; document.querySelectorAll('#qFil button').forEach(function (b) { b.setAttribute('aria-pressed', b === t); }); drawInq();
+    }
+    if (t.classList && t.classList.contains('tab')) {
+      document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', x === t); });
+      $('#p-rulings').hidden = t.dataset.p !== 'rulings'; $('#p-inq').hidden = t.dataset.p !== 'inq';
+    }
+    if (t.id === 'reload') { loadRulings(); loadInq(); }
+    if (t.dataset && t.dataset.cmd) runCmd(t);
+  });
+
+  function runCmd(b) {
+    var cmd = b.dataset.cmd;
+    if (cmd === 'Resolve' && !b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Press again to resolve';
+      setTimeout(function () { delete b.dataset.armed; b.textContent = 'Resolve'; }, 5000); return;
+    }
+    delete b.dataset.armed; if (cmd === 'Resolve') b.textContent = 'Resolve';
+    document.querySelectorAll('[data-cmd]').forEach(function (x) { x.disabled = true; });
+    $('#cmdStatus').textContent = cmd + ': running… this can take a few minutes.';
+    post('/command', { command: cmd }).then(function (v) {
+      $('#cmdStatus').textContent = v.ok ? cmd + ': ' + (v.status || 'Done') + (v.result ? ' — ' + v.result : '') : cmd + ' refused: ' + (v.error || 'unknown error');
+      loadRulings();
+    }).catch(function () { $('#cmdStatus').textContent = cmd + ': no answer. Check the Control tab before trying again.'; })
+      .then(function () { document.querySelectorAll('[data-cmd]').forEach(function (x) { x.disabled = false; }); });
+  }
+
+  fetch(location.origin + '/api/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (me) {
+    if (!me || !me.signedIn) { $('#gate').hidden = false; return; }
+    if (!me.gm) { $('#gate').hidden = false; $('#gateText').textContent = 'This console is for the game master only.'; return; }
+    $('#app').hidden = false; $('#kick').textContent = 'Game master · ' + me.name;
+    loadRulings(); loadInq();
+  }).catch(function () { $('#gate').hidden = false; });
+})();
+</script>
+</body>
+</html>

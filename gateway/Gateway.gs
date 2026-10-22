@@ -14,6 +14,14 @@
  *     The public star chart (as the Standings book's Star Chart and Hyperlanes):
  *     charted systems in full, uncharted ones as position only.
  *   command {command: Prepare|Resolve|Refresh}  -> {ok, ran, status, result}
+ *
+ * GM's Desk (the Worker allows these to the GM only, except ask/myInquiries):
+ *   gmRulings   {}                    -> {ok, turn, rulings:[{row, ref, nation, item, why, suggested, decision, status, action}]}
+ *   gmDecide    {row, decision}       -> {ok}   writes Rulings!G (GM decision) for one row of the prepared turn
+ *   ask         {discordId, question} -> {ok, id} a player's question, kept on the Inquiries tab
+ *   myInquiries {discordId}           -> {ok, inquiries}  that nation's own questions and answers only
+ *   gmInquiries {}                    -> {ok, inquiries}  every question, with suggested answers
+ *   gmAnswer    {id, answer}          -> {ok}   posts the GM's answer to a question
  *     Writes the command to Control!B3 and runs the engine's pollControl()
  *     at once. Keep the timed poller slow (30 min) so the two never collide.
  *
@@ -47,6 +55,12 @@ function doPost(e) {
       case 'submit':  return gwReply_(gwSubmit_(req.discordId, req.submittedBy, req.orders, req));
       case 'chart':   return gwReply_(gwChart_());
       case 'command': return gwReply_(gwCommand_(req.command));
+      case 'gmRulings':   return gwReply_(gwRulings_());
+      case 'gmDecide':    return gwReply_(gwDecide_(req.row, req.decision));
+      case 'ask':         return gwReply_(gwAsk_(req.discordId, req.submittedBy, req.question));
+      case 'myInquiries': return gwReply_(gwMyInquiries_(req.discordId));
+      case 'gmInquiries': return gwReply_(gwInquiries_());
+      case 'gmAnswer':    return gwReply_(gwAnswer_(req.id, req.answer));
       default:        return gwReply_({ ok: false, error: 'Unknown action' });
     }
   } catch (err) {
@@ -262,4 +276,107 @@ function gwPlans_(n) {
   });
   var rows = Object.keys(latest).map(function (k) { return latest[k]; }).sort(function (a, b) { return b.t - a.t; }).map(function (x) { return x.row; });
   return [['Plan', 'Objective', 'Last sent', 'Last orders', 'Last covert orders', 'Last supports']].concat(rows);
+}
+
+// ---- GM's Desk: rulings ----
+
+/** The turn being prepared: one past the last resolved turn. */
+function gwOpenTurn_() { return (parseInt(gwTurn_(), 10) || 0) + 1; }
+
+function gwTable_(name) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(name);
+  if (!sh) return { sh: null, head: [], rows: [] };
+  var v = sh.getDataRange().getDisplayValues();
+  return { sh: sh, head: v[0].map(function (h) { return String(h).trim(); }), rows: v.slice(1) };
+}
+
+/** The prepared turn's rulings, each with the order behind it. Numbered R-<turn>-<n> in sheet order. */
+function gwRulings_() {
+  var turn = gwOpenTurn_();
+  var R = gwTable_('Rulings'), A = gwTable_('Actions');
+  var ai = function (k) { return A.head.indexOf(k); };
+  var byRow = {};
+  A.rows.forEach(function (r) { byRow[String(r[ai('Row')])] = r; });
+  var ri = function (k) { return R.head.indexOf(k); };
+  var out = [], n = 0;
+  R.rows.forEach(function (r, i) {
+    if (String(r[ri('Turn')]) !== String(turn) || !String(r[ri('Item')]).trim()) return;
+    n++;
+    var src = String(r[ri('Source')] || ''), m = src.match(/Actions row (\d+)/), a = m ? byRow[m[1]] : null;
+    out.push({
+      row: i + 2, ref: 'R-' + turn + '-' + n, nation: r[ri('Nation')], source: src, item: r[ri('Item')],
+      why: r[ri('Why it needs a ruling')], suggested: r[ri('Suggested ruling')], decision: r[ri('GM decision')], status: r[ri('Status')],
+      action: a ? { channel: a[ai('Channel')], text: a[ai('Posted text')], verb: a[ai('Verb')], details: a[ai('Details')], flag: a[ai('Flag')],
+        status: a[ai('Status')], cost: ['Industry', 'Energy', 'Research', 'Influence', 'Strategic'].map(function (k) { return a[ai(k)] ? a[ai(k)] + ' ' + k : ''; }).filter(String).join(', ') } : null
+    });
+  });
+  return { ok: true, turn: turn, rulings: out };
+}
+
+/** Writes the GM's decision for one ruling of the prepared turn; refuses other turns' rows. */
+function gwDecide_(row, decision) {
+  row = parseInt(row, 10);
+  var R = gwTable_('Rulings');
+  if (!R.sh || !(row >= 2) || row > R.rows.length + 1) return { ok: false, error: 'No such ruling' };
+  var r = R.rows[row - 2];
+  if (String(r[R.head.indexOf('Turn')]) !== String(gwOpenTurn_())) return { ok: false, error: 'That ruling is not for the turn being prepared' };
+  if (String(r[R.head.indexOf('Status')]).trim() === 'Settled') return { ok: false, error: 'Already settled at Resolve' };
+  R.sh.getRange(row, R.head.indexOf('GM decision') + 1).setValue(String(decision || '').slice(0, 5000));
+  return { ok: true };
+}
+
+// ---- GM's Desk: inquiries ----
+
+var GW_INQ_HEAD = ['ID', 'Submitted', 'Turn', 'Nation', 'Asked by', 'Question', 'Suggested answer', 'Answer', 'Status', 'Answered'];
+
+function gwInqSheet_() {
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName('Inquiries');
+  if (!sh) { sh = ss.insertSheet('Inquiries'); sh.getRange(1, 1, 1, GW_INQ_HEAD.length).setValues([GW_INQ_HEAD]).setFontWeight('bold'); sh.setFrozenRows(1); }
+  return sh;
+}
+
+function gwAsk_(discordId, askedBy, question) {
+  var p = gwPlayer_(discordId);
+  if (!p) return { ok: false, error: 'Not enrolled in this game' };
+  question = String(question || '').trim().slice(0, 4000);
+  if (!question) return { ok: false, error: 'No question' };
+  var n = gwNation_(p.nationId);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Busy, try again' };
+  try {
+    var sh = gwInqSheet_(), id = 'Q-' + sh.getLastRow();
+    sh.appendRow([id, new Date(), gwOpenTurn_(), n ? n['Nation'] : p.nationId, askedBy || discordId, question, '', '', 'Open', '']);
+    return { ok: true, id: id };
+  } finally { lock.releaseLock(); }
+}
+
+function gwInqRows_() {
+  var v = gwInqSheet_().getDataRange().getDisplayValues(), h = v[0];
+  return v.slice(1).filter(function (r) { return String(r[0]).trim(); }).map(function (r) { var o = {}; h.forEach(function (k, j) { o[k] = r[j]; }); return o; });
+}
+
+/** A player sees only their own nation's questions and the GM's answers, never suggested answers. */
+function gwMyInquiries_(discordId) {
+  var p = gwPlayer_(discordId);
+  if (!p) return { ok: false, error: 'Not enrolled in this game' };
+  var n = gwNation_(p.nationId), name = n ? n['Nation'] : p.nationId;
+  var list = gwInqRows_().filter(function (o) { return o['Nation'] === name; }).map(function (o) {
+    return { id: o['ID'], submitted: o['Submitted'], turn: o['Turn'], question: o['Question'], answer: o['Answer'], status: o['Status'], answered: o['Answered'] };
+  }).reverse();
+  return { ok: true, inquiries: list };
+}
+
+function gwInquiries_() { return { ok: true, inquiries: gwInqRows_().reverse() }; }
+
+function gwAnswer_(id, answer) {
+  answer = String(answer || '').trim().slice(0, 6000);
+  if (!answer) return { ok: false, error: 'No answer' };
+  var sh = gwInqSheet_(), v = sh.getDataRange().getDisplayValues();
+  for (var i = 1; i < v.length; i++) {
+    if (v[i][0] === id) {
+      sh.getRange(i + 1, 8, 1, 3).setValues([[answer, 'Answered', new Date()]]);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'No such question' };
 }

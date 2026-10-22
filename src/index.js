@@ -141,11 +141,33 @@ async function api(request, env, url) {
     return json({ games: list.filter(Boolean) });
   }
 
-  const m = path.match(/^\/api\/games\/([a-z0-9-]+)\/(view|submit|command|chart)$/);
+  const m = path.match(/^\/api\/games\/([a-z0-9-]+)\/(view|submit|command|chart|ask|inquiries|gm\/rulings|gm\/decide|gm\/inquiries|gm\/answer)$/);
   if (m) {
     const game = findGame(m[1]);
     if (!game) return json({ error: "No such game." }, 404);
     const action = m[2];
+    const clip = (s, n) => String(s == null ? "" : s).slice(0, n);
+
+    // ---- GM's Desk: GM only ----
+    if (action.startsWith("gm/")) {
+      if (!isGM(user, env)) return json({ error: "GM only." }, 403);
+      if (action === "gm/rulings") return json(await callGateway(game, env, { action: "gmRulings" }));
+      if (action === "gm/inquiries") return json(await callGateway(game, env, { action: "gmInquiries" }));
+      if (request.method !== "POST") return json({ error: "POST only." }, 405);
+      const b = await request.json();
+      if (action === "gm/decide") return json(await callGateway(game, env, { action: "gmDecide", row: Number(b.row), decision: clip(b.decision, 5000) }));
+      if (action === "gm/answer") return json(await callGateway(game, env, { action: "gmAnswer", id: clip(b.id, 20), answer: clip(b.answer, 6000) }));
+    }
+
+    // ---- GM's Desk: players' questions (their own only; the gateway checks the nation) ----
+    if (action === "inquiries") return json(await callGateway(game, env, { action: "myInquiries", discordId: user.id }));
+    if (action === "ask") {
+      if (request.method !== "POST") return json({ error: "POST only." }, 405);
+      const b = await request.json();
+      const q = clip(b.question, 4000).trim();
+      if (!q) return json({ ok: false, error: "No question." }, 400);
+      return json(await callGateway(game, env, { action: "ask", discordId: user.id, submittedBy: user.name, question: q }));
+    }
 
     if (action === "command") {
       if (!isGM(user, env)) return json({ error: "GM only." }, 403);
@@ -170,7 +192,7 @@ async function api(request, env, url) {
       if (request.method !== "POST") return json({ error: "POST only." }, 405);
       const body = await request.json();
       // Accepts the basket's structured submission, or a bare list of order lines.
-      const clip = (s, n) => String(s == null ? "" : s).slice(0, n);
+
       const routine = (Array.isArray(body.routine) ? body.routine : Array.isArray(body.orders) ? body.orders : [])
         .map((l) => clip(l, 2000).trim()).filter(Boolean).slice(0, 80);
       const plans = (Array.isArray(body.plans) ? body.plans : []).slice(0, 5).map((p) => ({
