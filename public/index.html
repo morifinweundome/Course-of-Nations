@@ -88,7 +88,7 @@
     const el = document.createElement("div");
     el.className = "game";
     const role = g.nation ? `Playing as ${g.nation}` : (g.gm ? "Game master" : "");
-    el.innerHTML = `<div><h3></h3><div class="meta"></div></div><a class="btn" href="/game.html?id=${encodeURIComponent(g.id)}">Open</a>`;
+    el.innerHTML = `<div><h3></h3><div class="meta"></div></div><a class="btn" href="${g.page || "#"}?game=${encodeURIComponent(g.id)}">Open</a>`;
     el.querySelector("h3").textContent = g.title;
     if (g.gm) { const b = document.createElement("span"); b.className = "badge"; b.textContent = "GM"; el.querySelector("h3").appendChild(b); }
     el.querySelector(".meta").textContent = g.configured ? `${role} — ${g.tagline}` : `${g.tagline} (not yet connected)`;

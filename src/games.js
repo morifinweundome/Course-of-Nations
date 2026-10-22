@@ -9,6 +9,7 @@ export const GAMES = [
     tagline: "Young interstellar civilisations in an uncharted galaxy.",
     gateway: "https://script.google.com/macros/s/AKfycbwV-IdbyShx4_wFZ0ABKpNpiXxDg8o3qnULFyTQZJaFH1-2-AvvOs3geZeoVEy0notnZA/exec",
     keySecret: "GATEWAY_KEY_STARVERSE_SANDBOX",
+    page: "/starverse/nation.html",
     timezone: "Asia/Singapore",
   },
 ];

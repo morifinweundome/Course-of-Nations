@@ -135,7 +135,7 @@ async function api(request, env, url) {
         const who = await callGateway(g, env, { action: "whoami", discordId: user.id });
         const nation = who.ok ? who.nation : null;
         if (!nation && !gm) return null;
-        return { id: g.id, title: g.title, tagline: g.tagline, nation, gm, configured: who.ok };
+        return { id: g.id, title: g.title, tagline: g.tagline, page: g.page, nation, gm, configured: who.ok };
       })
     );
     return json({ games: list.filter(Boolean) });

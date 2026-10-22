@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nation Sheet · Starverse Infinitas</title>
+<meta name="description" content="Your nation's private sheet: stockpiles, income, upkeep, committed orders and projected stockpiles.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#05080D">
+<base href="https://morifinweundome.github.io/Starverse-Infinitas/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#05080D;--band1:#0C1420;--band2:#132033;--head:#13233A;--line:#2C4A68;--line2:#1B2D44;--text:#D3DEEA;--bright:#E8F0F8;--chrome:#B9D3EA;--steel:#8FB3D4;--muted:#7F95AB;--gold:#F2C76B;--up:#5FD38D;--down:#E58A8A;--warn:#F2C76B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 Lato,Calibri,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(1100px 520px at 80% -10%,rgba(44,74,104,.3),transparent 60%),radial-gradient(900px 500px at 0% 110%,rgba(44,74,104,.18),transparent 60%)}
+a{color:var(--steel)}
+:focus-visible{outline:2px solid var(--steel);outline-offset:2px;border-radius:4px}
+.top{position:sticky;top:0;z-index:10;background:rgba(5,8,13,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line2)}
+.top .in{max-width:1180px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:18px}
+.top img{height:30px;width:auto}
+.top nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.top nav a{padding:6px 12px;border-radius:8px;text-decoration:none;color:var(--muted);font-weight:700;font-size:14px}
+.top nav a:hover{color:var(--bright);background:var(--band1)}
+main{max-width:1180px;margin:0 auto;padding:30px 20px 80px}
+.kicker{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--steel);font-weight:700}
+h1{margin:4px 0 6px;font-size:clamp(30px,5vw,44px);line-height:1.1;color:var(--bright);font-weight:900}
+h2{font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--steel);margin:0 0 12px;font-weight:900}
+.hero{display:flex;flex-wrap:wrap;align-items:center;gap:20px;margin-bottom:22px}
+.emblem{width:84px;height:84px;border-radius:16px;border:1px solid var(--line2);background:linear-gradient(165deg,var(--band2),var(--band1));display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none}
+.emblem img{width:100%;height:100%;object-fit:contain}
+.emblem span{font-size:26px;font-weight:900;color:var(--chrome);letter-spacing:.06em}
+.who{flex:1;min-width:240px}
+.lede{margin:0;color:var(--text);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.lede .p{color:var(--muted)}
+.acts{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-weight:700;font-size:14.5px;padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:linear-gradient(180deg,#183050,#122640);color:var(--bright);text-decoration:none;cursor:pointer}
+.btn:hover{border-color:var(--steel);box-shadow:0 0 0 1px rgba(143,179,212,.25),0 6px 20px rgba(0,0,0,.35)}
+.btn.gold{border-color:#8a6a2a;background:linear-gradient(180deg,#3a2c10,#2a1f0b);color:#FBE7B5}
+.btn.gold:hover{border-color:var(--gold)}
+.btn[aria-disabled=true]{opacity:.45;pointer-events:none}
+.stamp{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:8px}
+.stamp .dot{width:8px;height:8px;border-radius:50%;background:#4a6280}
+.stamp.live .dot{background:#5FD38D;box-shadow:0 0 8px #5FD38D}
+.stamp.err .dot{background:#E06666}
+.stamp button{font:inherit;font-size:12px;background:none;border:1px solid var(--line);border-radius:6px;color:var(--chrome);padding:1px 8px;cursor:pointer}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:24px;overflow-x:auto}
+.tab{font:inherit;font-weight:700;font-size:15px;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:10px 14px;cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--bright)}
+.tab[aria-selected=true]{color:var(--bright);border-bottom-color:var(--steel)}
+.tab .n{font-size:12px;color:var(--steel);margin-left:6px;font-weight:400}
+.group{margin:0 0 32px}
+.note{font-size:13px;color:var(--muted);margin:-4px 0 14px}
+.panel{background:linear-gradient(165deg,var(--band2),var(--band1));border:1px solid var(--line2);border-radius:12px;padding:16px}
+/* stockpiles */
+.res{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.rc{position:relative;background:linear-gradient(165deg,var(--band2),var(--band1));border:1px solid var(--line2);border-radius:14px;padding:16px 16px 14px;transition:border-color .15s,transform .15s}
+.rc:hover{border-color:var(--line);transform:translateY(-1px)}
+.rc .hd{display:flex;align-items:center;gap:8px;font-weight:900;color:var(--bright);font-size:16px}
+.rc .hd .si-ico{width:2em;height:2em}
+.rc .big{font-size:36px;font-weight:900;color:var(--bright);line-height:1.1;margin:8px 0 2px;font-variant-numeric:tabular-nums}
+.rc .sub{font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.rc dl{display:grid;grid-template-columns:1fr auto;gap:3px 12px;margin:12px 0 0;font-size:14px}
+.rc dt{color:var(--muted)}
+.rc dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;color:var(--chrome)}
+.rc .proj{margin-top:10px;padding-top:10px;border-top:1px solid var(--line2);display:flex;justify-content:space-between;align-items:baseline}
+.rc .proj b{font-size:20px;color:var(--bright);font-variant-numeric:tabular-nums}
+.d{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;margin-left:6px}
+.d.up{color:var(--up)}.d.down{color:var(--down)}.d.flat{color:var(--muted)}
+.rc.short{border-color:#7a3434}
+.rc.short .proj b{color:var(--down)}
+.flag{position:absolute;top:12px;right:12px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid #7a3434;color:#F3B5B5;background:rgba(122,52,52,.18)}
+.bar{height:6px;border-radius:999px;background:#0a121d;border:1px solid var(--line2);margin-top:10px;position:relative;overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;border-radius:999px;background:linear-gradient(90deg,#3c6e9c,#8FB3D4)}
+.bar i.p{background:rgba(242,199,107,.55)}
+/* tables */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th{background:var(--head);color:var(--bright);text-align:left;font-weight:700;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-top:1px solid var(--line2);vertical-align:top}
+tbody tr:nth-child(odd){background:var(--band1)}
+tbody tr:nth-child(even){background:var(--band2)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--muted)}
+.none{padding:22px 18px;text-align:center;color:var(--muted);font-style:italic;border:1px dashed var(--line2);border-radius:12px}
+/* vitals */
+.vit{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.vc{background:linear-gradient(165deg,var(--band2),var(--band1));border:1px solid var(--line2);border-radius:12px;padding:14px}
+.vc .t{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);font-weight:700;display:flex;align-items:center;gap:6px}
+.vc .v{font-size:24px;font-weight:900;color:var(--bright);margin-top:4px;font-variant-numeric:tabular-nums}
+.vc .v small{font-size:14px;color:var(--muted);font-weight:400}
+.vc .s{font-size:13px;color:var(--muted)}
+.meter{height:8px;border-radius:999px;background:#0a121d;border:1px solid var(--line2);margin-top:8px;position:relative;overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:999px;background:linear-gradient(90deg,#3c6e9c,#8FB3D4)}
+.meter i.hot{background:linear-gradient(90deg,#8a3a3a,#E58A8A)}
+.meter b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
+/* identity */
+.id{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:14.5px;align-items:baseline}
+.kv dt{color:var(--muted);white-space:nowrap}
+.kv dd{margin:0;color:var(--bright)}
+.tiers{display:flex;flex-wrap:wrap;gap:8px}
+.tier{display:flex;flex-direction:column;align-items:center;min-width:86px;padding:8px 10px;border:1px solid var(--line2);border-radius:10px;background:var(--band1)}
+.tier b{font-size:22px;color:var(--bright)}
+.tier span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel)}
+.pill{display:inline-block;font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--chrome);white-space:nowrap}
+.pill.ok{border-color:#2f6b4a;color:#9be3b8}.pill.wait{border-color:#8a6a2a;color:#FBE7B5}.pill.no{border-color:#7a3434;color:#F3B5B5}
+.gate{max-width:560px;margin:60px auto;text-align:center}
+.gate p{color:var(--muted)}
+.foot{margin-top:40px;color:var(--muted);font-size:13px;text-align:center}
+/* decision aids */
+.since{display:flex;flex-wrap:wrap;gap:8px;margin:-6px 0 22px}
+.since span{font-size:13px;padding:4px 10px;border-radius:999px;border:1px solid var(--line2);background:var(--band1);color:var(--chrome);white-space:nowrap}
+.since span b{font-variant-numeric:tabular-nums}
+.clock{display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:4px 12px;border-radius:999px;border:1px solid #8a6a2a;color:#FBE7B5;background:rgba(138,106,42,.15);font-variant-numeric:tabular-nums}
+.clock.late{border-color:#7a3434;color:#F3B5B5;background:rgba(122,52,52,.18)}
+.receipt{white-space:pre-wrap;font-size:14px;line-height:1.55;margin:0}
+.receipt b{display:block;margin-top:10px;color:var(--steel);font-size:11px;letter-spacing:.2em;text-transform:uppercase}
+.receipt b:first-child{margin-top:0}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.warn{border-left:3px solid var(--warn);padding:10px 14px;background:rgba(242,199,107,.07);border-radius:0 10px 10px 0;margin:0 0 10px;font-size:14px}
+.warn.bad{border-left-color:var(--down);background:rgba(229,138,138,.08)}
+.okline{color:var(--muted);font-size:14px;font-style:italic}
+.aff{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.aff.now{border-color:#2f6b4a;color:#9be3b8}.aff.next{border-color:#8a6a2a;color:#FBE7B5}.aff.no{border-color:#7a3434;color:#F3B5B5}.aff.lock{color:var(--muted)}
+.fil{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.fchip{font:inherit;font-size:13px;padding:5px 12px;border:1px solid var(--line2);border-radius:999px;background:var(--band1);color:var(--muted);cursor:pointer}
+.fchip[aria-pressed=true]{border-color:var(--steel);color:var(--bright);background:var(--head)}
+.outlook td.short{color:var(--down);font-weight:700}
+@media (max-width:640px){.top img{height:24px}.top nav a{padding:6px 8px;font-size:13px}.emblem{width:64px;height:64px}.rc .big{font-size:30px}.acts{width:100%}.acts .btn{flex:1;justify-content:center}}
+@media (min-width:1280px){body{font-size:16.5px}}
+.gmbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:14px 0 4px;padding:12px 14px;border:1px dashed currentColor;border-radius:10px;opacity:.95}
+.gmbar button{cursor:pointer;font:inherit}
+.gmbar button[disabled]{opacity:.5;cursor:wait}
+.gmstatus{font-size:.9em;opacity:.85}
+</style>
+</head>
+<body>
+<header class="top"><div class="in">
+  <a href="./"><img src="assets/wordmark.png" alt="Starverse Infinitas" width="1000" height="235"></a>
+  <nav><a href="rules.html" target="si-rules">Rules</a><a href="map.html" id="mapNav" target="si-map">Star map</a><a href="standings.html" target="si-standings">Standings</a><a href="archives.html" target="si-archives">Archives</a><a href="herald.html" target="si-herald">Herald</a></nav>
+</div></header>
+<main id="main">
+  <div class="gate" id="gate" hidden>
+    <span class="kicker">Nation sheet</span>
+    <h1 id="gateTitle">Sign in to see your nation</h1>
+    <p id="gateText">Your nation sheet opens once you are signed in with the Discord account enrolled in this game.</p>
+    <p><a class="btn gold" id="gateBtn" href="#">Go to Course of Nations</a></p>
+  </div>
+
+  <div id="sheet" hidden>
+    <div class="hero">
+      <div class="emblem" id="emblem"></div>
+      <div class="who">
+        <span class="kicker" id="kick">Nation sheet</span>
+        <h1 id="name">…</h1>
+        <p class="lede" id="lede"></p>
+        <div class="stamp" id="stamp"><span class="dot"></span><span id="stampText">Reading your record…</span></div>
+      </div>
+      <div class="acts">
+        <a class="btn gold" id="orders" target="_blank" rel="noopener" aria-disabled="true">✦ Send orders</a>
+        <a class="btn" id="pmap" target="si-map" aria-disabled="true">Private star map</a>
+      </div>
+    </div>
+    <div class="gmbar" id="gmbar" hidden>
+      <span class="kicker">Game master</span>
+      <button class="btn" data-cmd="Prepare">Prepare</button>
+      <button class="btn" data-cmd="Resolve">Resolve</button>
+      <button class="btn" data-cmd="Refresh">Refresh player sheets</button>
+      <span class="gmstatus" id="gmstatus"></span>
+    </div>
+
+    <div class="since" id="since"></div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-p="overview">Overview</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="plan">Plan the turn</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="realm">Systems &amp; worlds<span class="n" id="nS"></span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="forces">Forces<span class="n" id="nF"></span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="state">State &amp; fiscal code</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="diplomacy">Contacts &amp; treaties<span class="n" id="nD"></span></button>
+      <button class="tab" role="tab" aria-selected="false" data-p="statement">Statement</button>
+    </div>
+
+    <section id="p-overview">
+      <div class="group">
+        <h2>Stockpiles</h2>
+        <p class="note" id="stockNote"></p>
+        <div class="res" id="main4"></div>
+      </div>
+      <div class="group">
+        <h2>Five-turn outlook</h2>
+        <p class="note">At this turn's income and upkeep, after the orders already costed, with no new orders.</p>
+        <div id="outlook"></div>
+      </div>
+      <div class="group">
+        <h2>Strategic resources</h2>
+        <div id="strat"></div>
+      </div>
+      <div class="group">
+        <h2>Orders this turn <span class="clock" id="clock" hidden></span></h2>
+        <div class="two"><div class="panel"><h2 style="margin-bottom:8px">Your latest submission</h2><div id="receipt"></div></div>
+        <div><div id="orderList"></div></div></div>
+      </div>
+      <div class="group">
+        <h2>Warnings</h2>
+        <div id="warnings"></div>
+      </div>
+      <div class="group">
+        <h2>Vital signs</h2>
+        <div class="vit" id="vitals"></div>
+      </div>
+      <div class="group">
+        <h2>Headroom</h2>
+        <div class="vit" id="headroom"></div>
+      </div>
+      <div class="group">
+        <div class="two">
+          <div><h2>Stability outlook</h2><div id="stab"></div></div>
+          <div><h2>Upkeep each turn</h2><div id="upkeep"></div></div>
+        </div>
+      </div>
+      <div class="group">
+        <h2>Under way</h2>
+        <div id="works"></div>
+      </div>
+    </section>
+
+    <section id="p-plan" hidden>
+      <div class="group">
+        <h2>Within reach</h2>
+        <p class="note" id="reachNote"></p>
+        <div class="fil" id="reachFil"></div>
+        <div id="reach"></div>
+      </div>
+      <div class="group">
+        <h2>Price list</h2>
+        <p class="note">What each order costs your nation, after its own modifiers. <span class="aff now">Now</span> can be paid from stores after the orders already costed; <span class="aff next">Next turn</span> once this turn's income is in.</p>
+        <div class="fil" id="priceFil"></div>
+        <div id="prices"></div>
+      </div>
+    </section>
+
+    <section id="p-realm" hidden>
+      <div class="group"><h2>Systems held</h2><div id="systems"></div></div>
+      <div class="group"><h2>Worlds</h2><div id="worlds"></div></div>
+    </section>
+
+    <section id="p-forces" hidden>
+      <div class="group"><h2>Fleets and armies</h2><div id="forces"></div></div>
+    </section>
+
+    <section id="p-state" hidden>
+      <div class="group"><h2>The state</h2><div class="id" id="identity"></div></div>
+      <div class="group"><h2>Technology</h2><div class="tiers" id="tiers"></div></div>
+      <div class="group"><h2>Fiscal code</h2><div id="fiscal"></div></div>
+    </section>
+
+    <section id="p-diplomacy" hidden>
+      <div class="group"><h2>Nations met</h2><div id="contacts"></div></div>
+      <div class="group"><h2>Treaties in force</h2><div id="treaties"></div></div>
+      <div class="group"><h2>Debts</h2><div id="debts"></div></div>
+    </section>
+
+    <section id="p-statement" hidden>
+      <div class="group">
+        <h2>Statement</h2>
+        <p class="note">Every change to your stockpiles over the last three turns, newest first.</p>
+        <div id="statement"></div>
+      </div>
+    </section>
+  </div>
+  <p class="foot">Lore decides who you are; your choices decide what you become.</p>
+</main>
+<script src="assets/symbols.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function num(v) { var n = parseFloat(String(v == null ? '' : v).replace(/[, ]/g, '')); return isFinite(n) ? n : 0; }
+  function fmt(n, sign) {
+    n = Math.round(n * 10) / 10;
+    var s = Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
+    if (sign) return (n > 0 ? '+' : n < 0 ? '−' : '±') + s;
+    return (n < 0 ? '−' : '') + s;
+  }
+  function ico(name, cls) { return window.SISym ? SISym.icon(name, cls) : ''; }
+  function chips(list) { return window.SISym ? SISym.chips(esc(list)) : esc(list); }
+
+  /* ---------- the game (Course of Nations) ---------- */
+  var HOME = location.origin + '/';
+  var GAME = null;
+  try { GAME = new URLSearchParams(location.search).get('game'); } catch (e) {}
+  if (!GAME || !/^[a-z0-9-]+$/.test(GAME)) GAME = 'starverse-sandbox';
+  var API = location.origin + '/api/games/' + GAME;
+  $('#gateBtn').href = HOME;
+  function gate(title, text) {
+    $('#gateTitle').textContent = title; $('#gateText').textContent = text;
+    $('#sheet').hidden = true; $('#gate').hidden = false;
+  }
+  var VIEW = null;
+  function loadView() {
+    VIEW = fetch(API + '/view', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 401) { gate('Sign in to see your nation', 'Your nation sheet opens once you are signed in with the Discord account enrolled in this game.'); throw 'signin'; }
+        return r.json();
+      })
+      .then(function (v) {
+        if (!v.ok) { gate('No nation to show', v.error || 'This account holds no nation in this game.'); throw 'none'; }
+        return v;
+      });
+    return VIEW;
+  }
+  $('#sheet').hidden = false;
+
+  /* ---------- game master ---------- */
+  fetch(location.origin + '/api/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (me) {
+    if (!me || !me.gm) return;
+    $('#gmbar').hidden = false;
+    document.querySelectorAll('#gmbar button').forEach(function (b) {
+      b.onclick = function () {
+        var cmd = b.dataset.cmd;
+        if (cmd === 'Resolve' && !confirmResolve()) return;
+        document.querySelectorAll('#gmbar button').forEach(function (x) { x.disabled = true; });
+        $('#gmstatus').textContent = cmd + ': running… this can take a few minutes.';
+        fetch(API + '/command', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd }) })
+          .then(function (r) { return r.json(); })
+          .then(function (v) {
+            $('#gmstatus').textContent = v.ok ? (cmd + ': ' + (v.status || 'Done') + (v.result ? ' — ' + v.result : '')) : (cmd + ' refused: ' + (v.error || 'unknown error'));
+            if (v.ok) load();
+          })
+          .catch(function () { $('#gmstatus').textContent = cmd + ': no answer. Check the Control tab before trying again.'; })
+          .then(function () { document.querySelectorAll('#gmbar button').forEach(function (x) { x.disabled = false; }); });
+      };
+    });
+  }).catch(function () {});
+  function confirmResolve() {
+    var b = document.querySelector('#gmbar [data-cmd="Resolve"]');
+    if (b.dataset.armed) { delete b.dataset.armed; b.textContent = 'Resolve'; return true; }
+    b.dataset.armed = '1'; b.textContent = 'Press again to resolve';
+    setTimeout(function () { if (b.dataset.armed) { delete b.dataset.armed; b.textContent = 'Resolve'; } }, 5000);
+    return false;
+  }
+
+  /* ---------- reading ---------- */
+  function parseCSV(text) {
+    var rows = [], row = [], cur = '', q = false;
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(cur); cur = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+      else cur += ch;
+    }
+    if (cur || row.length) { row.push(cur); rows.push(row); }
+    return rows.map(function (r) { return r.map(function (v) { return v.trim(); }); });
+  }
+  function objects(rows) {
+    var h = rows[0] || [];
+    return rows.slice(1).filter(function (r) { return r.some(function (v) { return v !== ''; }); })
+      .map(function (r) { var o = {}; h.forEach(function (k, i) { o[k] = r[i] == null ? '' : r[i]; }); return o; });
+  }
+  function get(tab) {
+    return (VIEW || loadView()).then(function (v) {
+      var rows = v.tabs && v.tabs[tab];
+      if (!rows) throw 'missing ' + tab;
+      return objects(rows.map(function (r) { return r.map(function (x) { return String(x).trim(); }); }));
+    });
+  }
+  function soft(tab) { return get(tab).catch(function () { return []; }); }
+
+  /* ---------- drawing ---------- */
+  function table(rows, cols, opts) {
+    opts = opts || {};
+    if (!rows.length) return '<div class="none">' + esc(opts.empty || 'Nothing here yet.') + '</div>';
+    return '<div class="tbl"><table><thead><tr>' + cols.map(function (c) { return '<th' + (c.n ? ' class="n"' : '') + '>' + esc(c.t || c.k) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + rows.map(function (r) {
+        return '<tr>' + cols.map(function (c) {
+          var v = r[c.k];
+          var html = c.f ? c.f(v, r) : esc(v);
+          return '<td' + (c.n ? ' class="n"' : '') + '>' + html + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  function delta(n) { var c = n > 0.05 ? 'up' : n < -0.05 ? 'down' : 'flat'; return '<span class="d ' + c + '">' + fmt(n, true) + '</span>'; }
+
+  var S = {};
+  function kv(k) { return S[k] == null ? '' : S[k]; }
+
+  function drawHero() {
+    var id = kv('Nation ID'), nm = kv('Nation');
+    document.title = nm + ' · Nation Sheet · Starverse Infinitas';
+    $('#name').textContent = nm;
+    var em = $('#emblem');
+    em.innerHTML = '<span>' + esc(id) + '</span>';
+    var im = new Image(); im.alt = nm + ' emblem';
+    im.onload = function () { em.innerHTML = ''; em.appendChild(im); };
+    im.src = 'assets/emblems/' + encodeURIComponent(id) + '.png';
+    var prepared = kv('Orders prepared') === 'Yes';
+    $('#kick').textContent = 'Nation sheet · ' + (num(kv('Turn')) > 0 ? 'after turn ' + kv('Turn') : 'before the first turn') +
+      ' · orders for turn ' + kv('Orders open for turn') + (prepared ? ' prepared' : ' open');
+    $('#lede').innerHTML = (kv('Government') ? '<span>' + ico(kv('Government')) + esc(kv('Government')) + '</span>' : '') +
+      (kv('Player') ? '<span class="p">Led by ' + esc(kv('Player')) + '</span>' : '') +
+      (kv('Status') && kv('Status') !== 'Active' ? '<span class="pill wait">' + esc(kv('Status')) + '</span>' : '');
+    var o = $('#orders');
+    if (kv('Order form link')) { o.href = kv('Order form link'); o.removeAttribute('aria-disabled'); }
+    var m = $('#pmap');
+    if (kv('Private map link')) { m.href = kv('Private map link'); m.removeAttribute('aria-disabled'); }
+  }
+
+  var MAIN = ['Industry', 'Energy', 'Research', 'Influence'];
+  function drawStock(rows) {
+    var by = {}; rows.forEach(function (r) { by[r['Resource']] = r; });
+    var prepared = kv('Orders prepared') === 'Yes';
+    $('#stockNote').textContent = prepared
+      ? 'Projected stockpiles take this turn\'s income, upkeep and the orders already costed for turn ' + kv('Orders open for turn') + '.'
+      : 'Projected stockpiles take this turn\'s income and upkeep. Your orders are costed once the turn is prepared, Sunday 18:00 (SGT), and then appear here.';
+    $('#main4').innerHTML = MAIN.map(function (k) {
+      var r = by[k] || {}, s = num(r['Stockpile']), inc = num(r['Income']), up = num(r['Upkeep']), com = num(r['Committed']), p = num(r['Projected']);
+      var short = p < 0, top = Math.max(s, p, 1);
+      return '<div class="rc' + (short ? ' short' : '') + '">' + (short ? '<span class="flag">Short</span>' : '') +
+        '<div class="hd">' + ico(k, 'lg') + esc(k) + '</div>' +
+        '<div class="big">' + fmt(s) + '</div><div class="sub">In store</div>' +
+        '<dl><dt>Income</dt><dd>' + fmt(inc, true) + '</dd>' +
+        '<dt>Upkeep</dt><dd>' + (up ? fmt(-up, true) : '—') + '</dd>' +
+        '<dt>Orders</dt><dd>' + (com ? fmt(-com, true) : prepared ? '—' : 'not yet costed') + '</dd></dl>' +
+        '<div class="bar" title="Now and projected"><i class="p" style="width:' + Math.max(0, p) / top * 100 + '%"></i><i style="width:' + Math.min(s, Math.max(p, 0)) / top * 100 + '%"></i></div>' +
+        '<div class="proj"><span class="sub">Projected</span><span><b>' + fmt(p) + '</b>' + delta(p - s) + '</span></div></div>';
+    }).join('');
+    var st = rows.filter(function (r) { return r['Kind'] === 'Strategic' && ['Stockpile', 'Income', 'Upkeep', 'Committed', 'Projected'].some(function (c) { return num(r[c]); }); });
+    $('#strat').innerHTML = st.length ? table(st, [
+      { k: 'Resource', f: function (v) { return ico(v) + esc(v); } },
+      { k: 'Stockpile', n: 1, f: function (v) { return fmt(num(v)); } },
+      { k: 'Income', n: 1, f: function (v) { return fmt(num(v), true); } },
+      { k: 'Upkeep', n: 1, f: function (v) { return num(v) ? fmt(-num(v), true) : '—'; } },
+      { k: 'Committed', t: 'Orders', n: 1, f: function (v) { return num(v) ? fmt(-num(v), true) : '—'; } },
+      { k: 'Projected', n: 1, f: function (v, r) { return '<b>' + fmt(num(v)) + '</b>' + delta(num(v) - num(r['Stockpile'])); } }
+    ]) : '<div class="none">No strategic resources held or worked yet.</div>';
+  }
+
+  function meter(v, max, opts) {
+    opts = opts || {};
+    var w = max > 0 ? Math.min(100, Math.max(0, v / max * 100)) : 0;
+    return '<div class="meter"><i' + (opts.hot ? ' class="hot"' : '') + ' style="width:' + w + '%"></i>' +
+      (opts.mark != null && max > 0 ? '<b style="left:calc(' + Math.min(100, opts.mark / max * 100) + '% - 1px)"></b>' : '') + '</div>';
+  }
+  function drawVitals() {
+    var stab = num(kv('Stability')), tgt = num(kv('Stability target'));
+    var adm = num(kv('Administrative Capacity')), over = num(kv('Capacity over'));
+    var fcap = num(kv('Fleet Capacity')), fuse = num(kv('Ship capacity used'));
+    var acap = num(kv('Army Capacity')), gp = num(kv('Ground Power'));
+    var v = [];
+    v.push('<div class="vc"><div class="t">' + ico('Stability') + 'Stability</div><div class="v">' + fmt(stab) + ' <small>drifting toward ' + fmt(tgt) + '</small></div>' +
+      meter(stab, 20, { mark: tgt }) + '<div class="s">' + (stab < tgt ? 'Rising' : stab > tgt ? 'Falling' : 'Steady') + ' by one a turn toward its target</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Development') + 'Administrative Capacity</div><div class="v">' + fmt(adm) + '</div>' +
+      '<div class="s">' + (over > 0 ? '<span class="pill no">' + fmt(over) + ' over capacity</span>' : 'Within capacity') + ' · ' + esc(kv('Systems held') || 0) + ' systems held</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Fleet Power') + 'Fleet</div><div class="v">' + fmt(fuse) + ' <small>of ' + fmt(fcap) + ' capacity</small></div>' +
+      meter(fuse, fcap, { hot: fuse > fcap }) + '<div class="s">Fleet Power ' + fmt(num(kv('Fleet Power'))) + '</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Ground Power') + 'Army</div><div class="v">' + fmt(gp) + ' <small>of ' + fmt(acap) + ' capacity</small></div>' +
+      meter(gp, acap, { hot: gp > acap }) + '<div class="s">Ground Power</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Population') + 'Population</div><div class="v">' + fmt(num(kv('Population (bn)'))) + ' <small>billion</small></div>' +
+      '<div class="s">Workforce needed ' + fmt(num(kv('Workforce needed (bn)'))) + ' bn</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Stellar Mark') + 'Economy</div><div class="v">' + fmt(num(kv('GDP (SM)'))) + ' <small>SM GDP</small></div>' +
+      '<div class="s">Revenue ' + fmt(num(kv('Revenue (SM)'))) + ' SM · Debt ' + fmt(num(kv('Debt (SM)'))) + ' SM · Credit ' + esc(kv('Credit rating') || '—') + '</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Renown') + 'Standing</div><div class="v" style="font-size:18px">' + esc(kv('Renown standing') || '—') + '</div>' +
+      '<div class="s">' + ico('Infamy') + esc(kv('Infamy standing') || '—') + ' · ' + esc(kv('Active treaties') || 0) + ' treaties · ' + esc(kv('Trade agreements') || 0) + ' of ' + esc(kv('Trade slots') || 0) + ' trade slots</div></div>');
+    $('#vitals').innerHTML = v.join('');
+  }
+
+  function drawOrders(rows) {
+    var prepared = kv('Orders prepared') === 'Yes';
+    if (!rows.length) {
+      $('#orderList').innerHTML = '<div class="none">' + (prepared ? 'No orders were costed for this turn.' : 'Your orders for turn ' + esc(kv('Orders open for turn')) + ' are costed when the turn is prepared. Until then, send them with the button above; your latest submission replaces every earlier one.') + '</div>';
+      return;
+    }
+    $('#orderList').innerHTML = table(rows, [
+      { k: 'Order' },
+      { k: 'Status', f: function (v) { var c = v === 'Ready' || v === 'Applied' ? 'ok' : v === 'Rejected' ? 'no' : 'wait'; return '<span class="pill ' + c + '">' + esc(v) + '</span>'; } },
+      { k: 'Industry', n: 1 }, { k: 'Energy', n: 1 }, { k: 'Research', n: 1 }, { k: 'Influence', n: 1 }, { k: 'Strategic' }
+    ]);
+  }
+
+  function drawWorks(rows) {
+    $('#works').innerHTML = table(rows, [{ k: 'Kind' }, { k: 'Item' }, { k: 'System' }, { k: 'Turn ordered', n: 1 }, { k: 'Completes at end of turn', t: 'Completes after turn', n: 1 }], { empty: 'Nothing is under construction.' });
+  }
+
+  function drawRealm(sys, worlds) {
+    $('#nS').textContent = sys.length || '';
+    $('#systems').innerHTML = table(sys, [
+      { k: 'Name', f: function (v, r) { return '<b>' + esc(v || r['System ID']) + '</b> <span class="muted">' + esc(r['System ID']) + '</span>'; } },
+      { k: 'Designation' }, { k: 'Development', n: 1, f: function (v, r) { return esc(v) + (r['Development cap'] ? ' <span class="muted">/ ' + esc(r['Development cap']) + '</span>' : ''); } },
+      { k: 'Buildings' }, { k: 'Condition' },
+      { k: 'Population (bn)', t: 'Pop. (bn)', n: 1 },
+      { k: 'Industry', n: 1 }, { k: 'Energy', n: 1 }, { k: 'Research', n: 1 }, { k: 'Influence', n: 1 }
+    ], { empty: 'No systems held.' });
+    $('#worlds').innerHTML = table(worlds, [
+      { k: 'World', f: function (v, r) { return '<b>' + esc(v) + '</b> <span class="muted">' + esc(r['System'] || r['System ID']) + (r['Orbit'] ? ' · orbit ' + esc(r['Orbit']) : '') + '</span>'; } },
+      { k: 'Kind' }, { k: 'Environment' }, { k: 'Population (bn)', t: 'Pop. (bn)', n: 1 }, { k: 'Buildings here', t: 'Buildings' },
+      { k: 'Industry', n: 1 }, { k: 'Energy', n: 1 }, { k: 'Research', n: 1 }, { k: 'Influence', n: 1 }
+    ], { empty: 'No worlds recorded.' });
+  }
+
+  function drawForces(rows) {
+    $('#nF').textContent = rows.length || '';
+    var SH = ['Escorts', 'Cruisers', 'Battleships', 'Dreadnoughts', 'Transports'];
+    $('#forces').innerHTML = table(rows, [
+      { k: 'Name', f: function (v, r) { return '<b>' + esc(v || r['Force ID']) + '</b> <span class="muted">' + esc(r['Force ID']) + '</span>'; } },
+      { k: 'Location', f: function (v, r) { return esc(r['Location name'] ? r['Location name'] + ' · ' + v : v); } },
+      { k: 'Ships', f: function (v, r) { return SH.filter(function (k) { return num(r[k]); }).map(function (k) { return '<span style="white-space:nowrap">' + ico(k.replace(/es$|s$/, '')) + esc(r[k]) + ' ' + esc(k) + '</span>'; }).join(' · ') || '<span class="muted">—</span>'; } },
+      { k: 'Fleet Power', n: 1 }, { k: 'Ground Power', n: 1 }, { k: 'Capacity', n: 1 }
+    ], { empty: 'No forces raised.' });
+  }
+
+  function drawState(fiscal) {
+    var ideo = ['Order–Liberty', 'Sacred–Secular', 'Martial–Pacific', 'Outward–Inward'].map(function (k) { return kv(k); }).filter(Boolean).join(', ');
+    function row(k, v, html) { return v ? '<dt>' + esc(k) + '</dt><dd>' + (html || esc(v)) + '</dd>' : ''; }
+    $('#identity').innerHTML =
+      '<div class="panel"><dl class="kv">' + row('Government', kv('Government'), chips(kv('Government'))) + row('Ideology', ideo, chips(ideo)) + row('Civics', kv('Civics'), chips(kv('Civics'))) + '</dl></div>' +
+      '<div class="panel"><dl class="kv">' + row('Biology', kv('Biology')) + row('Habitat', kv('Habitat')) + row('Traits', kv('Traits'), chips(kv('Traits'))) +
+        row('Self and group', kv('Self and group')) + row('The beyond', kv('The beyond')) + row('Adaptation', kv('Signature adaptation')) + '</dl></div>';
+    $('#tiers').innerHTML = ['Military', 'Industry', 'Society', 'Logistics'].map(function (t) {
+      return '<div class="tier"><b>' + esc(kv(t + ' tier') || '1') + '</b><span>' + esc(t) + '</span></div>';
+    }).join('');
+    $('#fiscal').innerHTML = table(fiscal, [{ k: 'Instrument', f: function (v) { return '<b>' + esc(v) + '</b>'; } }, { k: 'Intensity' }, { k: 'As written', f: function (v) { return '<span class="muted">' + esc(v) + '</span>'; } }, { k: 'Since turn', n: 1 }], { empty: 'No fiscal code recorded.' });
+  }
+
+  function drawStatement(rows) {
+    $('#statement').innerHTML = table(rows, [
+      { k: 'Turn', n: 1 }, { k: 'Phase' },
+      { k: 'Resource', f: function (v) { return ico(v) + esc(v); } },
+      { k: 'Amount', n: 1, f: function (v) { return delta(num(v)); } },
+      { k: 'Reason' }, { k: 'Balance after', n: 1 }
+    ], { empty: 'No entries yet.' });
+  }
+
+
+  /* ---------- decision aids ---------- */
+  var STOCK = {};
+  function stratParse(t) { var o = {}; String(t || '').split(/\s*[;,]\s*/).forEach(function (p) { var m = p.match(/^([\d.]+)\s+(.+)$/); if (m) o[m[2]] = (o[m[2]] || 0) + num(m[1]); }); return o; }
+
+  function drawSince(hist) {
+    if (hist.length < 2) { $('#since').innerHTML = ''; return; }
+    var a = hist[hist.length - 2], b = hist[hist.length - 1];
+    var items = [['Industry', 'Industry'], ['Energy', 'Energy'], ['Research', 'Research'], ['Influence', 'Influence'], ['Stability', 'Stability'], ['Systems held', 'Development'], ['Fleet Power', 'Fleet Power'], ['Population (bn)', 'Population'], ['GDP (SM)', 'Stellar Mark']];
+    $('#since').innerHTML = '<span class="muted" style="border:0;background:none;padding-left:0">Since turn ' + esc(a['Turn']) + ':</span>' + items.map(function (it) {
+      var d = num(b[it[0]]) - num(a[it[0]]); if (Math.abs(d) < 0.05) return '';
+      return '<span>' + ico(it[1]) + esc(it[0].replace(' (bn)', '').replace(' (SM)', '')) + ' ' + delta(d) + '</span>';
+    }).join('') ;
+  }
+
+  function drawClock() {
+    var el = $('#clock');
+    if (kv('Mode') === 'Sandbox') { el.hidden = false; el.textContent = 'Sandbox · orders close when the GM prepares the turn'; return; }
+    function tick() {
+      var now = Date.now(), sg = new Date(now + 8 * 3600e3);              // SGT wall clock in UTC fields
+      var day = sg.getUTCDay(), dl = Date.UTC(sg.getUTCFullYear(), sg.getUTCMonth(), sg.getUTCDate() + ((7 - day) % 7), 18) - 8 * 3600e3;
+      if (dl <= now) dl += 7 * 864e5;
+      var s = Math.floor((dl - now) / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+      el.hidden = false; el.className = 'clock' + (s < 6 * 3600 ? ' late' : '');
+      el.textContent = 'Orders close in ' + (d ? d + 'd ' : '') + h + 'h ' + m + 'm · Sunday 18:00 SGT';
+    }
+    tick(); clearInterval(drawClock.t); drawClock.t = setInterval(tick, 30000);
+  }
+
+  function drawReceipt(rows) {
+    if (!rows.length) { $('#receipt').innerHTML = '<p class="okline">No orders received for this turn yet.</p>'; return; }
+    var o = {}; rows.forEach(function (r) { o[r['Field']] = r['Value']; });
+    var held = /^Held/.test(o['Identity'] || '');
+    $('#receipt').innerHTML = (held ? '<p class="warn bad">This submission is held: ' + esc(o['Identity']) + '. Send the form again from your own link.</p>' : '') +
+      '<div class="receipt">' + ['Submitted', 'Routine orders', 'Plan 1', 'Plan 2', 'Plan 3', 'Plan 4', 'Plan 5', 'Other covert orders', 'Questions for the GM'].filter(function (k) { return o[k]; })
+        .map(function (k) { return '<b>' + esc(k === 'Submitted' ? 'Received' : k) + '</b>' + esc(o[k]); }).join('') + '</div>';
+  }
+
+  function drawOutlook(rows) {
+    var by = {}; rows.forEach(function (r) { by[r['Resource']] = r; });
+    var head = '<tr><th>Resource</th><th class="n">Now</th>' + [1, 2, 3, 4, 5].map(function (i) { return '<th class="n">+' + i + '</th>'; }).join('') + '<th>Runs short</th></tr>';
+    var body = MAIN.map(function (k) {
+      var r = by[k] || {}, s = num(r['Stockpile']), net = num(r['Income']) - num(r['Upkeep']), com = num(r['Committed']), first = '';
+      var cells = [1, 2, 3, 4, 5].map(function (i) {
+        var v = s + net * i - com;
+        if (v < 0 && !first) first = 'After turn +' + i;
+        return '<td class="n' + (v < 0 ? ' short' : '') + '">' + fmt(v) + '</td>';
+      }).join('');
+      return '<tr><td>' + ico(k) + esc(k) + '</td><td class="n">' + fmt(s) + '</td>' + cells + '<td>' + (first ? '<span class="aff no">' + first + '</span>' : '<span class="muted">—</span>') + '</td></tr>';
+    }).join('');
+    $('#outlook').innerHTML = '<div class="tbl outlook"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>';
+  }
+
+  function drawHeadroom(sys) {
+    var adm = num(kv('Administrative Capacity')), held = num(kv('Systems held'));
+    var slots = sys.reduce(function (t, s) { return t + Math.max(0, num(s['Slots']) - num(s['Slots used'])); }, 0);
+    var card = function (icn, t, left, of, unit) {
+      var hot = left < 0;
+      return '<div class="vc"><div class="t">' + ico(icn) + esc(t) + '</div><div class="v">' + fmt(left) + ' <small>' + esc(unit) + '</small></div>' +
+        (of != null ? meter(of - left, of, { hot: hot }) : '') + '</div>';
+    };
+    $('#headroom').innerHTML =
+      card('Development', 'Administrative Capacity', adm - held, adm, 'more systems before penalties') +
+      card('Fleet Power', 'Fleet capacity', num(kv('Fleet Capacity')) - num(kv('Ship capacity used')), num(kv('Fleet Capacity')), 'capacity free') +
+      card('Ground Power', 'Army capacity', num(kv('Army Capacity')) - num(kv('Ground Power')), num(kv('Army Capacity')), 'capacity free') +
+      card('Stellar Mark', 'Trade slots', num(kv('Trade slots')) - num(kv('Trade agreements')), num(kv('Trade slots')), 'agreements free') +
+      card('Industry', 'Building slots', slots, null, 'free across ' + sys.length + ' system' + (sys.length === 1 ? '' : 's'));
+  }
+
+  function drawStability(rows) {
+    var stab = num(kv('Stability')), tgt = num(kv('Stability target'));
+    var next = stab < tgt ? stab + 1 : stab > tgt ? stab - 1 : stab;
+    var w = next <= 1 ? '<p class="warn bad">Next turn Stability falls to ' + next + ': Crisis.</p>' : next <= 3 ? '<p class="warn bad">Next turn Stability falls to ' + next + ': Unrest. Output −25%, no colonization, and a system rises in revolt.</p>' : '';
+    $('#stab').innerHTML = w + table(rows.map(function (r) { return r; }), [
+      { k: 'Component' }, { k: 'Value', n: 1, f: function (v, r) { return r['Component'] === 'Target' ? '<b>' + esc(v) + '</b>' : (r['Component'] === 'Base' ? esc(v) : delta(num(v))); } }
+    ]) + '<p class="note" style="margin-top:8px">Now ' + fmt(stab) + '; next turn ' + fmt(next) + '. Stability moves one point a turn toward its target.</p>';
+  }
+
+  function drawUpkeep(rows) {
+    $('#upkeep').innerHTML = table(rows, [{ k: 'Source' }, { k: 'Fuel (Energy)', n: 1 }, { k: 'Wages (Marks)', n: 1 }, { k: 'Other' }], { empty: 'Nothing to maintain.' }) +
+      '<p class="note" style="margin-top:8px">Wages are paid in any mix of Industry, Energy and Influence; with no mix named, from the largest stockpiles first.</p>';
+  }
+
+  function drawWarnings(sys, stockRows) {
+    var w = [];
+    var stab = num(kv('Stability')), tgt = num(kv('Stability target')), next = stab < tgt ? stab + 1 : stab > tgt ? stab - 1 : stab;
+    if (next <= 3) w.push(['bad', 'Stability will be ' + next + ' next turn (' + (next <= 1 ? 'Crisis' : 'Unrest') + ').']);
+    stockRows.forEach(function (r) { if (num(r['Projected']) < 0) w.push(['bad', esc(r['Resource']) + ' would run short this turn: projected ' + fmt(num(r['Projected'])) + '.']); });
+    if (num(kv('Capacity over')) > 0) w.push(['bad', 'Over Administrative Capacity by ' + fmt(num(kv('Capacity over'))) + '.']);
+    if (num(kv('Ship capacity used')) > num(kv('Fleet Capacity'))) w.push(['bad', 'Fleet over capacity: the excess is lost at the end of the turn, smallest ships first.']);
+    sys.forEach(function (s) {
+      var pop = num(s['Population (bn)']), cap = num(s['Carrying capacity (bn)']), g = num(s['Growth due (bn)']), nm = esc(s['Name'] || s['System ID']);
+      if (/yes|true/i.test(s['Overcrowded'] || '')) w.push(['bad', nm + ' is overcrowded: Stability suffers until it is relieved.']);
+      else if (cap && pop + g > cap) w.push(['', nm + ' will pass its carrying capacity next turn (' + fmt(pop + g) + ' of ' + fmt(cap) + ' bn).']);
+      else if (cap && pop / cap >= 0.9) w.push(['', nm + ' is near its carrying capacity (' + fmt(pop) + ' of ' + fmt(cap) + ' bn).']);
+      if (g > 0.05) w.push(['', nm + ' grows by ' + fmt(g) + ' bn next turn.']);
+    });
+    $('#warnings').innerHTML = w.length ? w.map(function (x) { return '<p class="warn ' + x[0] + '">' + x[1] + '</p>'; }).join('') : '<p class="okline">Nothing needs attention.</p>';
+  }
+
+  var reachRows = [], reachF = 'all', priceRows = [], priceF = 'all';
+  function filters(el, opts, cur, set) {
+    $(el).innerHTML = opts.map(function (o) { return '<button class="fchip" data-v="' + esc(o[0]) + '" aria-pressed="' + (o[0] === cur) + '">' + esc(o[1]) + '</button>'; }).join('');
+    $(el).querySelectorAll('.fchip').forEach(function (b) { b.onclick = function () { set(b.dataset.v); }; });
+  }
+  function drawReach() {
+    var R = num(kv('Jump range')), lanes = num(kv('Colonize within lanes'));
+    $('#reachNote').textContent = 'Jump range ' + R + ' a turn (' + (R + 1) + ' for one fleet that burns a Volatile isotope). Colonies may be founded directly within ' + lanes + ' lane' + (lanes > 1 ? 's' : '') + ' of a held system; farther needs an expedition. Uncharted systems show nothing until you hold a system next to them.';
+    filters('#reachFil', [['all', 'All'], ['col', 'Can colonize'], ['turn', 'This turn'], ['held', 'Held by others']], reachF, function (v) { reachF = v; drawReach(); });
+    var rows = reachRows.filter(function (r) { return reachF === 'all' || (reachF === 'col' && r['Colonize']) || (reachF === 'turn' && r['This turn'] === 'Yes') || (reachF === 'held' && r['Owner']); });
+    $('#reach').innerHTML = table(rows, [
+      { k: 'System ID', t: 'System', f: function (v, r) { return '<b>' + esc(r['Name'] || v) + '</b>' + (r['Name'] ? ' <span class="muted">' + esc(v) + '</span>' : ''); } },
+      { k: 'Jumps', n: 1, f: function (v, r) { return esc(v) + (r['This turn'] === 'Yes' ? '' : ' <span class="aff next">isotopes</span>'); } },
+      { k: 'Nearest', t: 'From' },
+      { k: 'Owner', f: function (v, r) { return r['Charted'] === 'Yes' ? (v ? esc(v) : '<span class="muted">Unclaimed</span>') : '<span class="muted">Uncharted</span>'; } },
+      { k: 'Class' }, { k: 'Environment' }, { k: 'Deposits', f: function (v) { return v ? chips(v) : ''; } }, { k: 'Feature' },
+      { k: 'Colonize', f: function (v) { return v === 'Direct' ? '<span class="aff now">Colony</span>' : v ? '<span class="aff next">Expedition</span>' : ''; } }
+    ], { empty: 'Nothing within reach.' });
+  }
+  function affordable(r) {
+    if (r['Unlocked'] === 'No') return 'lock';
+    var cost = { Industry: num(r['Industry']), Energy: num(r['Energy']), Research: num(r['Research']), Influence: num(r['Influence']) };
+    var st = stratParse(r['Strategic']); Object.keys(st).forEach(function (k) { cost[k] = st[k]; });
+    var now = true, next = true;
+    Object.keys(cost).forEach(function (k) {
+      if (!cost[k]) return; var s = STOCK[k] || {};
+      if (num(s['Stockpile']) - num(s['Committed']) < cost[k]) now = false;
+      if (num(s['Projected']) < cost[k]) next = false;
+    });
+    return now ? 'now' : next ? 'next' : 'no';
+  }
+  function drawPrices() {
+    var groups = ['all'].concat(priceRows.map(function (r) { return r['Group']; }).filter(function (g, i, a) { return a.indexOf(g) === i; }));
+    filters('#priceFil', groups.map(function (g) { return [g, g === 'all' ? 'All' : g]; }), priceF, function (v) { priceF = v; drawPrices(); });
+    var LBL = { now: 'Now', next: 'Next turn', no: 'Out of reach', lock: 'Locked' };
+    var cost = function (k) { return function (v) { return v ? ico(k) + esc(v) : ''; }; };
+    $('#prices').innerHTML = table(priceRows.filter(function (r) { return priceF === 'all' || r['Group'] === priceF; }), [
+      { k: 'Item', f: function (v, r) { return '<b>' + esc(v) + '</b>' + (r['Note'] ? '<br><span class="muted" style="font-size:12.5px">' + esc(r['Note']) + '</span>' : ''); } },
+      { k: 'Industry', n: 1, f: cost('Industry') }, { k: 'Energy', n: 1, f: cost('Energy') }, { k: 'Research', n: 1, f: cost('Research') }, { k: 'Influence', n: 1, f: cost('Influence') },
+      { k: 'Strategic', f: function (v) { return v ? chips(v) : ''; } },
+      { k: 'Affordable', f: function (v, r) { var a = affordable(r); return '<span class="aff ' + a + '">' + LBL[a] + '</span>' + (a === 'lock' && r['Requires'] ? '<br><span class="muted" style="font-size:12px">' + esc(r['Requires']) + '</span>' : ''); } }
+    ]);
+  }
+
+  function drawDiplomacy(contacts, treaties, debts) {
+    $('#nD').textContent = contacts.length || '';
+    $('#contacts').innerHTML = table(contacts, [{ k: 'Nation', f: function (v) { return '<b>' + esc(v) + '</b>'; } }, { k: 'Known through' }], { empty: 'You have met no other people.' });
+    $('#treaties').innerHTML = table(treaties, [{ k: 'Type' }, { k: 'With' }, { k: 'In force from', n: 1 }, { k: 'Terms' }], { empty: 'No treaties in force.' });
+    $('#debts').innerHTML = table(debts, [{ k: 'Direction' }, { k: 'With' }, { k: 'Outstanding (SM)', n: 1 }, { k: 'Instalment (SM)', n: 1 }, { k: 'Instalments due', n: 1 }, { k: 'Arrears (SM)', n: 1 }], { empty: 'No debts, owed or owing.' });
+  }
+
+  function stamp(kind, text, retry) {
+    $('#stamp').className = 'stamp ' + kind; $('#stampText').textContent = text;
+    var old = $('#stamp button'); if (old) old.remove();
+    if (retry) { var b = document.createElement('button'); b.textContent = 'Retry'; b.onclick = load; $('#stamp').appendChild(b); }
+  }
+  var loaded = false;
+  function load() {
+    VIEW = null;
+    Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History')])
+      .then(function (r) {
+        S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
+        STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
+        drawHero(); drawStock(r[1]); drawOrders(r[2]); drawVitals(); drawWorks(r[3]);
+        drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawStatement(r[8]);
+        drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
+        drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
+        reachRows = r[9]; drawReach(); priceRows = r[10]; drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
+        loaded = true;
+        stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      })
+      .catch(function (err) {
+        if (err === 'signin' || err === 'none') return;
+        if (!loaded) { $('#name').textContent = 'Your record'; $('#main4').innerHTML = '<div class="none">Your record could not be read just now. Please try again shortly.</div>'; }
+        stamp('err', loaded ? 'Could not refresh; showing the last reading' : 'Your record could not be read', true);
+      });
+  }
+
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.onclick = function () {
+      document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', x === t); });
+      ['overview', 'plan', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
+      history.replaceState(null, '', location.pathname + location.search + (t.dataset.p === 'overview' ? '' : '#' + t.dataset.p));
+    };
+  });
+  var h = location.hash.slice(1); var ht = document.querySelector('.tab[data-p="' + h + '"]'); if (ht) ht.click();
+  document.addEventListener('mouseover', function (e) {
+    var t = e.target.closest && e.target.closest('.rc,.vc,.btn,.tab');
+    if (t && t !== document.__siLast) { document.__siLast = t; if (window.SISound) SISound.fx('hover'); }
+  });
+  load(); setInterval(load, 5 * 60 * 1000);
+})();
+</script>
+<script src="assets/sound.js"></script>
+<script>SISound.init({ page: 'nation', buttons: true, fx: { button: 'fx-button.mp3', hover: 'fx-hover.mp3', select: 'fx-select.mp3' }, music: { calm: { tracks: [['map-1-hopes-and-dreams.mp3', 'Hopes and Dreams'], ['map-2-to-the-stars.mp3', 'To the Stars'], ['map-4-plans-in-motion.mp3', 'Plans in Motion']] } } });</script>
+</body>
+</html>
