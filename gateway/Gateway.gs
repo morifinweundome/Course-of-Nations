@@ -41,7 +41,7 @@ function doPost(e) {
     switch (req.action) {
       case 'whoami':  return gwReply_(gwWhoami_(req.discordId));
       case 'view':    return gwReply_(gwView_(req.discordId));
-      case 'submit':  return gwReply_(gwSubmit_(req.discordId, req.submittedBy, req.orders));
+      case 'submit':  return gwReply_(gwSubmit_(req.discordId, req.submittedBy, req.orders, req));
       case 'command': return gwReply_(gwCommand_(req.command));
       default:        return gwReply_({ ok: false, error: 'Unknown action' });
     }
@@ -131,10 +131,13 @@ function gwView_(discordId) {
   };
 }
 
-function gwSubmit_(discordId, submittedBy, orders) {
+function gwSubmit_(discordId, submittedBy, orders, req) {
   var p = gwPlayer_(discordId);
   if (!p) return { ok: false, error: 'Not enrolled in this game' };
-  if (!orders || !orders.length) return { ok: false, error: 'No orders' };
+  req = req || {};
+  var plans = (req.plans || []).filter(function (x) { return x && String(x.name || '').trim(); }).slice(0, 5);
+  orders = orders || [];
+  if (!orders.length && !plans.length && !req.covert && !req.questions) return { ok: false, error: 'No orders' };
   var n = gwNation_(p.nationId);
 
   var lock = LockService.getScriptLock();
@@ -142,15 +145,30 @@ function gwSubmit_(discordId, submittedBy, orders) {
   try {
     var sh = SpreadsheetApp.getActive().getSheetByName(GW.SUBMISSIONS);
     var width = sh.getLastColumn();
+    var head = sh.getRange(1, 1, 1, width).getValues()[0].map(function (h) { return String(h).trim(); });
     var row = new Array(width).fill('');
-    row[0] = new Date();
-    row[1] = n['Nation'];
-    row[2] = n['Order serial'];
-    row[3] = orders.map(String).join('\n');
-    row[4] = 'No';
-    if (width >= 36) row[35] = 'Submitted on the site by ' + (submittedBy || discordId);
+    // Written by column header, as the order form writes them, so the Orders inbox reads them alike.
+    function put(h, v) { var i = head.indexOf(h); if (i >= 0) row[i] = v; }
+    put('Timestamp', new Date());
+    put('Nation', n['Nation']);
+    put('Serial number', n['Order serial']);
+    put('Routine orders', orders.map(String).join('\n'));
+    put('Are you running a plan this turn?', plans.length ? 'Yes' : 'No');
+    plans.forEach(function (pl, i) {
+      var k = 'Plan ' + (i + 1) + ': ';
+      put(k + 'name', String(pl.name || ''));
+      put(k + 'objective', String(pl.objective || ''));
+      put(k + 'orders', String(pl.orders || ''));
+      put(k + 'covert orders', String(pl.covert || ''));
+      put(k + 'supports', String(pl.supports || ''));
+    });
+    put('Other covert orders', String(req.covert || ''));
+    put('Questions for the GM', String(req.questions || ''));
+    // Record who sent it in a note on the timestamp cell, out of the way of the inbox.
     sh.appendRow(row);
-    return { ok: true, row: sh.getLastRow(), turn: gwTurn_() };
+    var last = sh.getLastRow();
+    sh.getRange(last, 1).setNote('Submitted on the Course of Nations site by ' + (submittedBy || discordId));
+    return { ok: true, row: last, turn: gwTurn_() };
   } finally {
     lock.releaseLock();
   }

@@ -163,14 +163,27 @@ async function api(request, env, url) {
 
     if (action === "submit") {
       if (request.method !== "POST") return json({ error: "POST only." }, 405);
-      const { orders } = await request.json();
-      if (!Array.isArray(orders) || orders.length === 0) return json({ error: "No orders." }, 400);
+      const body = await request.json();
+      // Accepts the basket's structured submission, or a bare list of order lines.
+      const clip = (s, n) => String(s == null ? "" : s).slice(0, n);
+      const routine = (Array.isArray(body.routine) ? body.routine : Array.isArray(body.orders) ? body.orders : [])
+        .map((l) => clip(l, 2000).trim()).filter(Boolean).slice(0, 80);
+      const plans = (Array.isArray(body.plans) ? body.plans : []).slice(0, 5).map((p) => ({
+        name: clip(p && p.name, 200).trim(), objective: clip(p && p.objective, 2000),
+        orders: clip(p && p.orders, 6000), covert: clip(p && p.covert, 6000), supports: clip(p && p.supports, 500),
+      })).filter((p) => p.name);
+      const covert = clip(body.covert, 6000).trim();
+      const questions = clip(body.questions, 6000).trim();
+      if (!routine.length && !plans.length && !covert && !questions) return json({ ok: false, error: "No orders." }, 400);
       return json(
         await callGateway(game, env, {
           action: "submit",
           discordId: user.id,
           submittedBy: user.name,
-          orders,
+          orders: routine,
+          plans,
+          covert,
+          questions,
         })
       );
     }

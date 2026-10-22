@@ -132,9 +132,31 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 @media (max-width:640px){.top img{height:24px}.top nav a{padding:6px 8px;font-size:13px}.emblem{width:64px;height:64px}.rc .big{font-size:30px}.acts{width:100%}.acts .btn{flex:1;justify-content:center}}
 @media (min-width:1280px){body{font-size:16.5px}}
 .gmbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:14px 0 4px;padding:12px 14px;border:1px dashed currentColor;border-radius:10px;opacity:.95}
+.gmbar[hidden],[hidden]{display:none!important}
 .gmbar button{cursor:pointer;font:inherit}
 .gmbar button[disabled]{opacity:.5;cursor:wait}
 .gmstatus{font-size:.9em;opacity:.85}
+.bk-add{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px}
+.bk-add button{font:inherit;font-weight:700;font-size:13px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--band1);color:var(--chrome);cursor:pointer}
+.bk-add button:hover{border-color:var(--steel);color:var(--bright)}
+.bk-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line2);border-radius:12px;background:linear-gradient(180deg,var(--band1),rgba(12,20,32,.6));margin-bottom:8px}
+.bk-row .vb{font-weight:900;letter-spacing:.12em;font-size:12px;color:var(--gold);min-width:92px}
+.bk-row select,.bk-row input,.bk-ta,.bk-plan input{font:inherit;font-size:14px;color:var(--bright);background:#0A111B;border:1px solid var(--line);border-radius:8px;padding:6px 8px;max-width:100%}
+.bk-row input[type=number]{width:72px}
+.bk-row .cost{margin-left:auto;color:var(--chrome);font-size:13px;white-space:nowrap}
+.bk-row .msg{flex-basis:100%;font-size:13px}
+.bk-row .msg.bad{color:var(--down)}.bk-row .msg.ok{color:var(--up)}.bk-row .msg.wait{color:var(--warn)}
+.bk-row .x{background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px}
+.bk-row .x:hover{color:var(--down)}
+.bk-ta{width:100%;resize:vertical;line-height:1.5}
+.bk-sum{margin-top:12px}
+.bk-sum table td.short{color:var(--down);font-weight:700}
+.bk-plan{border:1px solid var(--line2);border-radius:12px;padding:12px;margin-bottom:10px;display:grid;gap:8px}
+.bk-plan .h{display:flex;gap:8px;align-items:center}
+.bk-plan .h input{flex:1}
+.bk-send{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.bk-send .note{flex-basis:100%;margin:6px 0 0}
+@media (max-width:640px){.bk-row .cost{margin-left:0;flex-basis:100%}}
 </style>
 </head>
 <body>
@@ -162,6 +184,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       <div class="acts">
         <a class="btn gold" id="orders" target="_blank" rel="noopener" aria-disabled="true">✦ Send orders</a>
         <a class="btn" id="pmap" target="si-map" aria-disabled="true">Private star map</a>
+        <a class="btn" id="gmap" href="map.html" target="si-galaxy">Galactic map</a>
       </div>
     </div>
     <div class="gmbar" id="gmbar" hidden>
@@ -176,6 +199,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" aria-selected="true" data-p="overview">Overview</button>
       <button class="tab" role="tab" aria-selected="false" data-p="plan">Plan the turn</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="write">Write orders</button>
       <button class="tab" role="tab" aria-selected="false" data-p="realm">Systems &amp; worlds<span class="n" id="nS"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="forces">Forces<span class="n" id="nF"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="state">State &amp; fiscal code</button>
@@ -270,6 +294,37 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <div id="statement"></div>
       </div>
     </section>
+    <section id="p-write" hidden>
+      <div class="group">
+        <h2>Write your orders <span class="clock" id="wTurn"></span></h2>
+        <p class="note">Build each order from what your nation holds; the basket checks slots, caps and costs as you go. Estimates use this turn's prices; the GM costs every order exactly when the turn is prepared. Your draft is kept in this browser until you send it.</p>
+        <div class="bk-add" id="bkAdd"></div>
+        <div id="bkList"></div>
+        <div class="bk-sum" id="bkSum"></div>
+      </div>
+      <div class="group">
+        <h2>Free-form orders</h2>
+        <p class="note">Treaties, policies, initiatives and anything the builder does not cover. One order per line, beginning with its verb: TREATY, POLICY, INITIATIVE, CONTACT, TRANSFER, CIVIC, SHIFT, REFORM.</p>
+        <textarea class="bk-ta" id="bkFree" rows="5" placeholder="TREATY Propose to Ul: a trade agreement&#10;POLICY Fund xenobiology academies on II-04"></textarea>
+      </div>
+      <div class="group">
+        <h2>Plans</h2>
+        <p class="note">A plan groups orders and covert operations under one objective. Optional; up to five.</p>
+        <div id="bkPlans"></div>
+        <button class="btn" type="button" id="bkPlanAdd">+ Add a plan</button>
+      </div>
+      <div class="group two">
+        <div><h2>Other covert orders</h2><p class="note">Seen only by the GM.</p><textarea class="bk-ta" id="bkCovert" rows="4"></textarea></div>
+        <div><h2>Questions for the GM</h2><p class="note">Answered before the turn is prepared where time allows.</p><textarea class="bk-ta" id="bkQs" rows="4"></textarea></div>
+      </div>
+      <div class="group bk-send">
+        <button class="btn gold" type="button" id="bkSend">✦ Send orders</button>
+        <button class="btn" type="button" id="bkClear">Clear draft</button>
+        <span class="gmstatus" id="bkStatus"></span>
+        <p class="note">Sending replaces any earlier submission for this turn. The order form remains available as a fallback: <a id="bkForm" target="_blank" rel="noopener">open the form</a>.</p>
+      </div>
+    </section>
+
   </div>
   <p class="foot">Lore decides who you are; your choices decide what you become.</p>
 </main>
@@ -344,6 +399,292 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     return false;
   }
 
+  /* ---------- order basket ---------- */
+  var BK = { sys: [], prices: [], reach: [], forces: [], draft: null, key: '' };
+  var BK_STRAT = ['Adamant ore', 'Lattice crystals', 'Antimatter', 'Volatile isotopes', 'Living compounds', 'Void matter'];
+  var BK_DESIG = ['Forge', 'Generator', 'Academy', 'Civic', 'Fortress', 'Trade Hub'];
+  var BK_BRANCH = ['Military', 'Industry', 'Society', 'Logistics'];
+  // Buildings in the rules that the price list does not carry.
+  var BK_EXTRA = [
+    { Item: 'Military College', Industry: '15', Strategic: '', Requires: 'Military Tier 2; takes 2 turns; once per nation', once: 'nation' },
+    { Item: 'Habitat Station', Industry: '12', Strategic: '', Requires: 'Society Tier 2; orbital, takes no building slot', orbital: true },
+    { Item: 'Arcology', Industry: '20', Strategic: '1 Lattice crystals', Requires: 'Industry Tier 4; Development 3; takes 2 turns' },
+    { Item: 'Planetary Shield', Industry: '20', Strategic: '2 Lattice crystals', Requires: 'Military Tier 4; takes 2 turns' },
+    { Item: 'Orbital Fortress', Industry: '25', Strategic: '2 Adamant ore', Requires: 'Military Tier 3; takes 2 turns' },
+    { Item: 'Gravity Well Generator', Industry: '20', Strategic: '2 Antimatter; 1 Lattice crystals', Requires: 'Logistics Tier 4; takes 2 turns' }
+  ];
+  var BK_VERBS = [
+    ['BUILD', 'Build'], ['DEVELOP', 'Develop'], ['DESIGNATE', 'Designate'], ['RESEARCH', 'Research'], ['COLONIZE', 'Colonize'],
+    ['SHIP', 'Ships'], ['GROUND', 'Ground forces'], ['DEFENCE', 'Static Defence'], ['MOVE', 'Move a force'], ['STABILITY', 'Buy Stability']
+  ];
+
+  function bkStore(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+  function bkBlank() { return { rows: [], free: '', plans: [], covert: '', questions: '' }; }
+  function bkSave() { bkStore(BK.key, JSON.stringify(BK.draft)); }
+  function bkStratParse(t) { var o = {}; String(t || '').split(/\s*;\s*/).forEach(function (p) { var m = p.match(/^([\d.]+)\s+(.+)$/); if (m) o[m[2].trim()] = (o[m[2].trim()] || 0) + num(m[1]); }); return o; }
+  function bkOpt(list, cur, ph) {
+    return (ph ? '<option value="">' + esc(ph) + '</option>' : '') + list.map(function (o) {
+      var v = Array.isArray(o) ? o[0] : o, t = Array.isArray(o) ? o[1] : o;
+      return '<option value="' + esc(v) + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' + esc(t) + '</option>';
+    }).join('');
+  }
+  function bkSysLabel(s) { return (s['Name'] ? s['Name'] + ' ' : '') + s['System ID']; }
+  function bkSys(id) { return BK.sys.filter(function (s) { return s['System ID'] === id; })[0]; }
+  function bkHeld() { return BK.sys.map(function (s) { return [s['System ID'], bkSysLabel(s)]; }); }
+  function bkBuildings() {
+    var list = BK.prices.filter(function (r) { return r['Group'] === 'Buildings' && num(r['Industry']) > 0 && r['Unlocked'] !== ''; })
+      .map(function (r) { return { Item: r['Item'], Industry: r['Industry'], Strategic: r['Strategic'], Requires: r['Requires'], locked: r['Unlocked'] === 'No',
+        once: /once per nation/i.test(r['Note'] || '') ? 'nation' : '' }; });
+    BK_EXTRA.forEach(function (x) { if (!list.some(function (b) { return b.Item === x.Item; })) list.push(x); });
+    return list;
+  }
+  function bkPriceRow(group, item) { return BK.prices.filter(function (r) { return r['Group'] === group && r['Item'] === item; })[0]; }
+
+  /* Each row: its order text, its estimated cost, and a check against the nation and the rest of the basket. */
+  function bkEval(r, i, rows) {
+    var out = { text: '', cost: {}, strat: {}, msg: '', cls: '' };
+    function bad(m) { out.msg = m; out.cls = 'bad'; }
+    function note(m) { if (!out.cls) { out.msg = m; out.cls = 'wait'; } }
+    var others = rows.filter(function (x, j) { return j !== i; });
+    switch (r.verb) {
+      case 'BUILD': {
+        var b = bkBuildings().filter(function (x) { return x.Item === r.what; })[0], s = bkSys(r.sys);
+        if (!b || !s) { bad('Choose a building and a system.'); break; }
+        var name = b.Item + (b.Item === 'Extractor' && r.res ? ' (' + r.res + ')' : '');
+        out.text = 'BUILD ' + name + ' @ ' + s['System ID'];
+        out.cost.Industry = num(b.Industry); out.strat = bkStratParse(b.Strategic);
+        var have = String(s['Buildings'] || '').split(/\s*,\s*/).filter(Boolean);
+        var dupBasket = others.some(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && x.what === r.what && (r.what !== 'Extractor' || x.res === r.res); });
+        if (b.locked) bad('Not yet unlocked: ' + (b.Requires || 'requirements not met') + '.');
+        else if (r.what === 'Extractor') {
+          if (r.res && have.indexOf('Extractor (' + r.res + ')') >= 0) bad('An Extractor already works that deposit here.');
+          else if (dupBasket) bad('Already in your basket.');
+        } else if (have.some(function (h) { return h === b.Item; }) || dupBasket) bad(b.Item + ' already stands (or is ordered) in ' + s['System ID'] + '; once per system.');
+        if (!out.cls && b.once === 'nation' && (BK.sys.some(function (x) { return String(x['Buildings']).indexOf(b.Item) >= 0; }) || others.some(function (x) { return x.verb === 'BUILD' && x.what === b.Item; })))
+          bad(b.Item + ' counts once per nation, and you already hold one.');
+        if (!out.cls && !b.orbital) {
+          var used = num(s['Slots used']) + others.filter(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && !(bkBuildings().filter(function (y) { return y.Item === x.what; })[0] || {}).orbital; }).length;
+          var free = num(s['Slots']) - used;
+          if (free < 1) bad('No free building slot in ' + s['System ID'] + ' (' + num(s['Slots used']) + ' of ' + num(s['Slots']) + ' used' + (used > num(s['Slots used']) ? ', plus orders in this basket' : '') + ').');
+          else out.msg = (free - 1) + ' slot' + (free - 1 === 1 ? '' : 's') + ' left in ' + s['System ID'] + ' after this.';
+        }
+        if (!out.cls && b.Requires) note('Requires: ' + b.Requires + '.' + (out.msg ? ' ' + out.msg : ''));
+        if (!out.cls && out.msg) out.cls = 'ok';
+        break;
+      }
+      case 'DEVELOP': {
+        var p = bkPriceRow('Development', r.what);
+        if (!p) { bad('Choose a world to raise.'); break; }
+        var m = r.what.match(/Raise\s+(\S+)\s+to\s+(\d+)/i);
+        out.text = 'DEVELOP ' + m[1] + ' ' + m[2]; out.cost.Industry = num(p['Industry']); out.strat = bkStratParse(p['Strategic']);
+        if (others.some(function (x) { return x.verb === 'DEVELOP' && x.what && x.what.split(' ')[1] === m[1]; })) bad('A system may rise only one level a turn.');
+        else { out.msg = p['Note'] || ''; out.cls = 'ok'; }
+        break;
+      }
+      case 'DESIGNATE': {
+        var s2 = bkSys(r.sys);
+        if (!s2 || !r.what) { bad('Choose a system and a designation.'); break; }
+        out.text = 'DESIGNATE ' + s2['System ID'] + ' ' + r.what;
+        if (s2['Designation'] === r.what) bad(s2['System ID'] + ' is already a ' + r.what + '.');
+        else note('Redesignation is costed when the turn is prepared.');
+        break;
+      }
+      case 'RESEARCH': {
+        if (!r.what) { bad('Choose a branch.'); break; }
+        var cur = num(kv(r.what + ' tier')) || 1;
+        out.text = 'RESEARCH ' + r.what + ' Tier ' + (cur + 1);
+        if (others.some(function (x) { return x.verb === 'RESEARCH' && x.what === r.what; })) bad('One tier a branch a turn.');
+        else if (cur >= 6) bad(r.what + ' is already at Tier 6.');
+        else note('Tier ' + cur + ' to ' + (cur + 1) + '; Research is costed when the turn is prepared' + (cur + 1 >= 5 ? ', with 5 or 10 strategic units' : '') + '.');
+        break;
+      }
+      case 'COLONIZE': {
+        var t = BK.reach.filter(function (x) { return x['System ID'] === r.sys; })[0];
+        if (!t) { bad('Choose a target.'); break; }
+        out.text = 'COLONIZE ' + t['System ID'];
+        var c = BK.prices.filter(function (x) { return x['Group'] === 'Colonies'; })[0] || { Energy: 5, Influence: 5 };
+        out.cost.Energy = num(c['Energy']); out.cost.Influence = num(c['Influence']);
+        if (others.some(function (x) { return x.verb === 'COLONIZE' && x.sys === r.sys; })) bad('Already in your basket.');
+        else if (num(kv('Stability')) <= 3) bad('A nation in Unrest or worse may not colonize this turn.');
+        else { out.msg = (t['Class'] || '') + ' ' + (t['Environment'] || '') + (t['Deposits'] ? ' · ' + t['Deposits'] : '') + ' · ' + (t['Colonize'] || '') + ' · 0.3 bn settlers leave your worlds'; out.cls = 'ok'; }
+        break;
+      }
+      case 'SHIP': case 'GROUND': {
+        var grp = r.verb === 'SHIP' ? 'Ships' : 'Ground formations', p2 = bkPriceRow(grp, r.what), s3 = bkSys(r.sys), q = Math.max(1, Math.round(num(r.qty) || 1));
+        if (!p2 || !s3) { bad('Choose a ' + (r.verb === 'SHIP' ? 'category' : 'formation') + ', a number and a system.'); break; }
+        out.text = r.verb + ' ' + r.what + ' x' + q + ' @ ' + s3['System ID'];
+        out.cost.Industry = num(p2['Industry']) * q;
+        var st = bkStratParse(p2['Strategic']); Object.keys(st).forEach(function (k) { out.strat[k] = st[k] * q; });
+        if (p2['Unlocked'] === 'No') bad('Not yet unlocked: ' + (p2['Requires'] || '') + '.');
+        else if (r.verb === 'SHIP' && String(s3['Buildings']).indexOf('Shipyard') < 0) bad('Ships may be built only at a system with a Shipyard.');
+        else if (r.verb === 'SHIP' && /Battleship|Dreadnought/.test(r.what) && num(s3['Development']) < 3) bad(r.what + 's need a Shipyard at Development 3 or more.');
+        else { out.msg = (p2['Note'] || '') + ' · estimate before your fiscal discounts'; out.cls = 'ok'; }
+        break;
+      }
+      case 'DEFENCE': {
+        var s4 = bkSys(r.sys), pts = Math.max(1, Math.round(num(r.qty) || 1));
+        if (!s4) { bad('Choose a system.'); break; }
+        out.text = 'DEFENCE ' + pts + ' @ ' + s4['System ID']; out.cost.Industry = 2 * pts;
+        if ((num(kv('Military tier')) || 1) < 3) bad('Static Defence needs Military Tier 3.'); else { out.msg = '2 Industry a point'; out.cls = 'ok'; }
+        break;
+      }
+      case 'MOVE': {
+        if (!r.what || !r.dest) { bad('Choose a force and a destination.'); break; }
+        out.text = 'MOVE ' + r.what + ' TO ' + String(r.dest).trim().toUpperCase();
+        out.msg = 'Jump range ' + (kv('Jump range') || '?') + ' (' + (kv('Jump range with Volatile isotopes') || '?') + ' with Volatile isotopes).'; out.cls = 'ok';
+        break;
+      }
+      case 'STABILITY': {
+        out.text = 'STABILITY'; out.cost.Influence = 5;
+        if (others.some(function (x) { return x.verb === 'STABILITY'; })) bad('Stability may be bought once a turn.');
+        else if (num(kv('Stability')) >= num(kv('Stability target'))) bad('Bought Stability never rises above its target (' + kv('Stability') + ' of ' + kv('Stability target') + ').');
+        else { out.msg = '+1 current Stability for 5 Influence.'; out.cls = 'ok'; }
+        break;
+      }
+    }
+    return out;
+  }
+
+  function bkRowHtml(r, i, ev) {
+    var f = '', held = bkHeld();
+    switch (r.verb) {
+      case 'BUILD':
+        f = '<select data-f="what">' + bkOpt(bkBuildings().map(function (b) { return [b.Item, b.Item + (b.locked ? ' (locked)' : '')]; }), r.what, 'Building…') + '</select> @ ' +
+          '<select data-f="sys">' + bkOpt(BK.sys.map(function (s) { var fr = num(s['Slots']) - num(s['Slots used']); return [s['System ID'], bkSysLabel(s) + ' · ' + fr + ' free']; }), r.sys, 'System…') + '</select>' +
+          (r.what === 'Extractor' ? ' <select data-f="res">' + bkOpt(BK_STRAT, r.res, 'Deposit (first uncovered)') + '</select>' : '');
+        break;
+      case 'DEVELOP':
+        f = '<select data-f="what">' + bkOpt(BK.prices.filter(function (p) { return p['Group'] === 'Development'; }).map(function (p) { return p['Item']; }), r.what, 'World to raise…') + '</select>';
+        break;
+      case 'DESIGNATE':
+        f = '<select data-f="sys">' + bkOpt(BK.sys.map(function (s) { return [s['System ID'], bkSysLabel(s) + ' · ' + (s['Designation'] || 'none')]; }), r.sys, 'System…') + '</select> as ' +
+          '<select data-f="what">' + bkOpt(BK_DESIG, r.what, 'Designation…') + '</select>';
+        break;
+      case 'RESEARCH':
+        f = '<select data-f="what">' + bkOpt(BK_BRANCH.map(function (b) { var t = num(kv(b + ' tier')) || 1; return [b, b + ' · Tier ' + t + ' to ' + (t + 1)]; }), r.what, 'Branch…') + '</select>';
+        break;
+      case 'COLONIZE':
+        f = '<select data-f="sys">' + bkOpt(BK.reach.filter(function (x) { return !x['Owner'] && x['Colonize'] && !/^no/i.test(x['Colonize']); })
+          .map(function (x) { return [x['System ID'], x['System ID'] + ' · ' + (x['Class'] || '') + ' ' + (x['Environment'] || '') + ' · ' + x['Colonize']]; }), r.sys, 'Target…') + '</select>';
+        break;
+      case 'SHIP': case 'GROUND':
+        var grp = r.verb === 'SHIP' ? 'Ships' : 'Ground formations';
+        f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +
+          '<select data-f="what">' + bkOpt(BK.prices.filter(function (p) { return p['Group'] === grp; }).map(function (p) { return [p['Item'], p['Item'] + (p['Unlocked'] === 'No' ? ' (locked)' : '')]; }), r.what, r.verb === 'SHIP' ? 'Category…' : 'Formation…') + '</select> @ ' +
+          '<select data-f="sys">' + bkOpt(r.verb === 'SHIP' ? BK.sys.filter(function (s) { return String(s['Buildings']).indexOf('Shipyard') >= 0; }).map(function (s) { return [s['System ID'], bkSysLabel(s)]; }) : held, r.sys, 'System…') + '</select>';
+        break;
+      case 'DEFENCE':
+        f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> points @ <select data-f="sys">' + bkOpt(held, r.sys, 'System…') + '</select>';
+        break;
+      case 'MOVE':
+        f = '<select data-f="what">' + bkOpt(BK.forces.map(function (x) { return [x['Force ID'], (x['Name'] ? x['Name'] + ' ' : '') + x['Force ID'] + ' · at ' + (x['Location'] || '?')]; }), r.what, 'Force…') + '</select> to ' +
+          '<input data-f="dest" placeholder="System ID, e.g. II-15" value="' + esc(r.dest || '') + '" style="width:150px">';
+        break;
+      case 'STABILITY':
+        f = '<span class="muted">One point of current Stability</span>';
+        break;
+    }
+    var c = [];
+    MAIN.forEach(function (k) { if (ev.cost[k]) c.push(fmt(ev.cost[k]) + ' ' + ico(k)); });
+    Object.keys(ev.strat).forEach(function (k) { if (ev.strat[k]) c.push(fmt(ev.strat[k]) + ' ' + ico(k)); });
+    return '<div class="bk-row" data-i="' + i + '"><span class="vb">' + esc(r.verb) + '</span>' + f +
+      '<span class="cost">' + (c.length ? c.join(' · ') : '<span class="muted">costed at Prepare</span>') + '</span>' +
+      '<button class="x" type="button" data-del="' + i + '" title="Remove" aria-label="Remove">×</button>' +
+      (ev.msg ? '<div class="msg ' + ev.cls + '">' + esc(ev.msg) + '</div>' : '') +
+      (ev.text ? '<div class="msg" style="color:var(--muted)"><code>' + esc(ev.text) + '</code></div>' : '') + '</div>';
+  }
+
+  function drawBasket() {
+    if (!BK.draft) return;
+    var rows = BK.draft.rows, evs = rows.map(function (r, i) { return bkEval(r, i, rows); });
+    $('#bkList').innerHTML = rows.length ? rows.map(function (r, i) { return bkRowHtml(r, i, evs[i]); }).join('') : '<div class="none">Your basket is empty. Add an order above.</div>';
+    var tot = {};
+    evs.forEach(function (e) { Object.keys(e.cost).forEach(function (k) { tot[k] = (tot[k] || 0) + e.cost[k]; }); Object.keys(e.strat).forEach(function (k) { tot[k] = (tot[k] || 0) + e.strat[k]; }); });
+    var keys = MAIN.concat(BK_STRAT).filter(function (k) { return tot[k]; });
+    var bad = evs.filter(function (e) { return e.cls === 'bad'; }).length;
+    $('#bkSum').innerHTML = (keys.length ? '<div class="tbl"><table><thead><tr><th>Resource</th><th class="n">This basket</th><th class="n">Available next turn</th><th class="n">Left</th></tr></thead><tbody>' +
+      keys.map(function (k) {
+        var avail = num((STOCK[k] || {})['Projected']), left = avail - tot[k];
+        return '<tr><td>' + ico(k) + esc(k) + '</td><td class="n">' + fmt(tot[k]) + '</td><td class="n">' + fmt(avail) + '</td><td class="n' + (left < 0 ? ' short' : '') + '">' + fmt(left) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '') +
+      (bad ? '<p class="warn bad">' + bad + ' order' + (bad === 1 ? '' : 's') + ' would be refused as written.</p>' : '');
+    $('#bkFree').value = BK.draft.free; $('#bkCovert').value = BK.draft.covert; $('#bkQs').value = BK.draft.questions;
+    $('#bkPlans').innerHTML = BK.draft.plans.map(function (p, i) {
+      return '<div class="bk-plan" data-p="' + i + '"><div class="h"><input data-pf="name" placeholder="Plan name" value="' + esc(p.name) + '"><button class="btn" type="button" data-pdel="' + i + '">Remove</button></div>' +
+        '<input data-pf="objective" placeholder="Objective" value="' + esc(p.objective) + '">' +
+        '<textarea class="bk-ta" rows="3" data-pf="orders" placeholder="Orders under this plan, one per line">' + esc(p.orders) + '</textarea>' +
+        '<textarea class="bk-ta" rows="2" data-pf="covert" placeholder="Covert orders under this plan (GM only)">' + esc(p.covert) + '</textarea>' +
+        '<input data-pf="supports" placeholder="Which order the covert work supports (optional)" value="' + esc(p.supports) + '"></div>';
+    }).join('');
+    $('#bkPlanAdd').hidden = BK.draft.plans.length >= 5;
+  }
+
+  function bkInit() {
+    var turn = kv('Orders open for turn') || '';
+    BK.key = 'con-draft-' + GAME + '-' + (kv('Nation ID') || '') + '-T' + turn;
+    if (!BK.draft || BK.draft.__key !== BK.key) {
+      var saved = null; try { saved = JSON.parse(bkStore(BK.key) || 'null'); } catch (e) {}
+      BK.draft = saved || bkBlank(); BK.draft.__key = BK.key;
+    }
+    $('#wTurn').hidden = false; $('#wTurn').textContent = 'Turn ' + turn;
+    if (kv('Order form link')) $('#bkForm').href = kv('Order form link');
+    $('#bkAdd').innerHTML = BK_VERBS.map(function (v) { return '<button type="button" data-add="' + v[0] + '">+ ' + esc(v[1]) + '</button>'; }).join('');
+    drawBasket();
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!BK.draft) return;
+    if (t.dataset && t.dataset.add) { BK.draft.rows.push({ verb: t.dataset.add, qty: 1 }); bkSave(); drawBasket(); return; }
+    if (t.dataset && t.dataset.del != null) { BK.draft.rows.splice(+t.dataset.del, 1); bkSave(); drawBasket(); return; }
+    if (t.dataset && t.dataset.pdel != null) { BK.draft.plans.splice(+t.dataset.pdel, 1); bkSave(); drawBasket(); return; }
+    if (t.id === 'bkPlanAdd') { BK.draft.plans.push({ name: '', objective: '', orders: '', covert: '', supports: '' }); bkSave(); drawBasket(); return; }
+    if (t.id === 'bkClear') {
+      if (!t.dataset.armed) { t.dataset.armed = '1'; t.textContent = 'Press again to clear'; setTimeout(function () { delete t.dataset.armed; t.textContent = 'Clear draft'; }, 4000); return; }
+      delete t.dataset.armed; t.textContent = 'Clear draft'; BK.draft = bkBlank(); BK.draft.__key = BK.key; bkStore(BK.key, null); drawBasket(); return;
+    }
+    if (t.id === 'bkSend') bkSend(t);
+  });
+  document.addEventListener('change', function (e) {
+    var t = e.target, row = t.closest && t.closest('.bk-row');
+    if (row && t.dataset.f) { var r = BK.draft.rows[+row.dataset.i]; r[t.dataset.f] = t.value; if (t.dataset.f === 'what' && r.verb === 'BUILD') delete r.res; bkSave(); drawBasket(); }
+  });
+  document.addEventListener('input', function (e) {
+    var t = e.target; if (!BK.draft) return;
+    if (t.id === 'bkFree') BK.draft.free = t.value;
+    else if (t.id === 'bkCovert') BK.draft.covert = t.value;
+    else if (t.id === 'bkQs') BK.draft.questions = t.value;
+    else if (t.dataset && t.dataset.pf) { var p = t.closest('.bk-plan'); BK.draft.plans[+p.dataset.p][t.dataset.pf] = t.value; }
+    else return;
+    bkSave();
+  });
+
+  function bkSend(btn) {
+    var rows = BK.draft.rows, evs = rows.map(function (r, i) { return bkEval(r, i, rows); });
+    var routine = evs.map(function (e) { return e.text; }).filter(Boolean)
+      .concat(String(BK.draft.free || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean));
+    var plans = BK.draft.plans.filter(function (p) { return (p.name || '').trim(); });
+    if (!routine.length && !plans.length && !String(BK.draft.covert).trim() && !String(BK.draft.questions).trim()) { $('#bkStatus').textContent = 'Nothing to send yet.'; return; }
+    var bad = evs.filter(function (e) { return e.cls === 'bad'; }).length;
+    if (bad && !btn.dataset.armed) {
+      btn.dataset.armed = '1'; btn.textContent = 'Send anyway (' + bad + ' will be refused)';
+      setTimeout(function () { delete btn.dataset.armed; btn.textContent = '✦ Send orders'; }, 6000); return;
+    }
+    delete btn.dataset.armed; btn.textContent = '✦ Send orders'; btn.disabled = true;
+    $('#bkStatus').textContent = 'Sending…';
+    fetch(API + '/submit', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routine: routine, plans: plans, covert: BK.draft.covert || '', questions: BK.draft.questions || '' }) })
+      .then(function (r) { return r.json(); })
+      .then(function (v) {
+        if (!v.ok) { $('#bkStatus').textContent = 'Not sent: ' + (v.error || 'unknown error'); return; }
+        $('#bkStatus').textContent = 'Received ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + routine.length + ' order' + (routine.length === 1 ? '' : 's') +
+          (plans.length ? ', ' + plans.length + ' plan' + (plans.length === 1 ? '' : 's') : '') + '. Your draft stays here in case you want to revise and send again.';
+        if (window.SISound) SISound.fx('select');
+      })
+      .catch(function () { $('#bkStatus').textContent = 'No answer from the server. Your draft is safe; try again shortly.'; })
+      .then(function () { btn.disabled = false; });
+  }
+
   /* ---------- reading ---------- */
   function parseCSV(text) {
     var rows = [], row = [], cur = '', q = false;
@@ -406,7 +747,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       (kv('Player') ? '<span class="p">Led by ' + esc(kv('Player')) + '</span>' : '') +
       (kv('Status') && kv('Status') !== 'Active' ? '<span class="pill wait">' + esc(kv('Status')) + '</span>' : '');
     var o = $('#orders');
-    if (kv('Order form link')) { o.href = kv('Order form link'); o.removeAttribute('aria-disabled'); }
+    o.href = '#write'; o.removeAttribute('target'); o.removeAttribute('aria-disabled');
+    o.onclick = function (e) { e.preventDefault(); var t = document.querySelector('.tab[data-p="write"]'); if (t) { t.click(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
     var m = $('#pmap');
     if (kv('Private map link')) { m.href = kv('Private map link'); m.removeAttribute('aria-disabled'); }
   }
@@ -492,7 +834,19 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#systems').innerHTML = table(sys, [
       { k: 'Name', f: function (v, r) { return '<b>' + esc(v || r['System ID']) + '</b> <span class="muted">' + esc(r['System ID']) + '</span>'; } },
       { k: 'Designation' }, { k: 'Development', n: 1, f: function (v, r) { return esc(v) + (r['Development cap'] ? ' <span class="muted">/ ' + esc(r['Development cap']) + '</span>' : ''); } },
-      { k: 'Buildings' }, { k: 'Condition' },
+      { k: 'Buildings', f: function (v) {
+          var list = String(v || '').split(/\s*,\s*/).filter(Boolean);
+          var orb = list.filter(function (b) { return /Habitat Station/i.test(b); });
+          var main = list.filter(function (b) { return !/Habitat Station/i.test(b); });
+          return (main.length ? esc(main.join(', ')) : '<span class="muted">—</span>') +
+            (orb.length ? '<br><span class="muted">Orbital: ' + esc(orb.join(', ')) + '</span>' : '');
+        } },
+      { k: 'Slots', n: 1, f: function (v, r) {
+          var tot = num(v), used = num(r['Slots used']), free = Math.max(0, tot - used);
+          return '<span title="Building slots used of total">' + fmt(used) + ' <span class="muted">/ ' + fmt(tot) + '</span></span>' +
+            (free ? '<br><span class="pill ok" style="font-size:11px">' + free + ' free</span>' : '');
+        } },
+      { k: 'Condition' },
       { k: 'Population (bn)', t: 'Pop. (bn)', n: 1 },
       { k: 'Industry', n: 1 }, { k: 'Energy', n: 1 }, { k: 'Research', n: 1 }, { k: 'Influence', n: 1 }
     ], { empty: 'No systems held.' });
@@ -705,6 +1059,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
         reachRows = r[9]; drawReach(); priceRows = r[10]; drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
+        BK.sys = r[4]; BK.prices = r[10]; BK.reach = r[9]; BK.forces = r[6]; bkInit();
         loaded = true;
         stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       })
@@ -718,8 +1073,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
       document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', x === t); });
-      ['overview', 'plan', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
-      history.replaceState(null, '', location.pathname + location.search + (t.dataset.p === 'overview' ? '' : '#' + t.dataset.p));
+      ['overview', 'plan', 'write', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
+      history.replaceState(null, '', location.origin + location.pathname + location.search + (t.dataset.p === 'overview' ? '' : '#' + t.dataset.p));
     };
   });
   var h = location.hash.slice(1); var ht = document.querySelector('.tab[data-p="' + h + '"]'); if (ht) ht.click();

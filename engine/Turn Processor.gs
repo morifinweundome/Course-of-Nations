@@ -434,11 +434,11 @@ function tpPrepareInModel_(model, turn) {
     stats.rulings++;
   });
 
-  // Nations with no submission enter Caretaker; nations that return leave it.
+  // Nations that return leave Caretaker at once. Entering Caretaker is decided at Resolve
+  // (tpResolver_.phaseCaretaker), so a Prepare run before the deadline cannot halve anyone's income.
   world.nations.forEach(function (n) {
     if (n.status === 'Eliminated' || n.status === 'Minor Power') return;
     var has = !!subs.byNation[n.id];
-    if (!has && n.status !== 'Caretaker') { model.tab('Nations').set(n.row, 'Status', 'Caretaker'); n.status = 'Caretaker'; }
     if (has && n.status === 'Caretaker') { model.tab('Nations').set(n.row, 'Status', 'Active'); n.status = 'Active'; }
     if (!has && tpCountPriorCaretaker_(model, n.id, turn) >= 5) {
       tpAddRuling_(R, turn, n.id, 'Caretaker', 'Sixth consecutive Caretaker turn', 'After six Caretaker turns the nation becomes a GM-run independent power.',
@@ -1438,6 +1438,7 @@ tpResolver_.prototype.run = function (dry) {
   this.decisions = this.readDecisions();
   this.actions = this.readActions();
 
+  this.phaseCaretaker(dry);
   this.phaseDiplomacy();
   this.phaseIncome();
   this.phaseUpkeep();
@@ -1452,6 +1453,20 @@ tpResolver_.prototype.run = function (dry) {
   if (!dry) { this.model.commit(); tpFlush_(); this.model.reload('Calculations'); this.world.reloadCalc(); }
   this.phaseStability();
   this.log('Resolution', 'All', 'Turn resolved', 'Turn ' + this.turn + ' resolved', 'Yes', '');
+};
+
+/** Caretaker is settled here, at Resolve, not at Prepare: a nation whose orders produced no
+ *  Actions rows this turn enters Caretaker; one that has rows leaves it. */
+tpResolver_.prototype.phaseCaretaker = function (dry) {
+  var self = this, N = this.model.tab('Nations'), withOrders = {}, changed = false;
+  this.actions.forEach(function (a) { withOrders[a.nation] = true; });
+  this.world.nations.forEach(function (n) {
+    if (n.status === 'Eliminated' || n.status === 'Minor Power') return;
+    if (!withOrders[n.id] && n.status !== 'Caretaker') { N.set(n.row, 'Status', 'Caretaker'); n.status = 'Caretaker'; changed = true; }
+    if (withOrders[n.id] && n.status === 'Caretaker') { N.set(n.row, 'Status', 'Active'); n.status = 'Active'; changed = true; }
+  });
+  // Income is read from Calculations, whose formulas read Nations Status: recalculate before Income.
+  if (changed && !dry) { this.model.commit(); tpFlush_(); this.model.reload('Calculations'); this.world.reloadCalc(); }
 };
 
 /** Ledger line (columns B to I and K only). */
