@@ -125,6 +125,7 @@ function gwView_(discordId) {
     if (s.getLastRow() === 0) return;
     tabs[s.getName()] = s.getDataRange().getDisplayValues();
   });
+  tabs['Plans'] = gwPlans_(n);
   return {
     ok: true,
     nation: n['Nation'],
@@ -236,4 +237,29 @@ function gwChart_() {
   });
   var lanes = table('Lanes').map(function (l) { return [l['From'], l['To'], l['Kind'] || 'lane']; });
   return { ok: true, chart: [head].concat(rows), lanes: [['From', 'To', 'Kind']].concat(lanes) };
+}
+
+/** The nation's own plans, from its past submissions: the latest version of each plan by name. */
+function gwPlans_(n) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(GW.SUBMISSIONS);
+  var v = sh.getDataRange().getValues();
+  var h = v[0].map(function (x) { return String(x).trim(); });
+  function col(name) { return h.indexOf(name); }
+  var iT = col('Timestamp'), iN = col('Nation'), iS = col('Serial number'), latest = {};
+  v.slice(1).forEach(function (r) {
+    if (String(r[iN]).trim() !== n['Nation'] || String(r[iS]).replace(/\s/g, '').toUpperCase() !== String(n['Order serial']).toUpperCase()) return;
+    var t = r[iT] instanceof Date ? r[iT] : new Date(r[iT]);
+    for (var k = 1; k <= 5; k++) {
+      var nm = String(r[col('Plan ' + k + ': name')] || '').trim();
+      if (!nm) continue;
+      var key = nm.toLowerCase();
+      if (latest[key] && latest[key].t >= t) continue;
+      latest[key] = { t: t, row: [nm, String(r[col('Plan ' + k + ': objective')] || ''),
+        Utilities.formatDate(t, 'Asia/Singapore', 'yyyy-MM-dd HH:mm'),
+        String(r[col('Plan ' + k + ': orders')] || ''), String(r[col('Plan ' + k + ': covert orders')] || ''),
+        String(r[col('Plan ' + k + ': supports')] || '')] };
+    }
+  });
+  var rows = Object.keys(latest).map(function (k) { return latest[k]; }).sort(function (a, b) { return b.t - a.t; }).map(function (x) { return x.row; });
+  return [['Plan', 'Objective', 'Last sent', 'Last orders', 'Last covert orders', 'Last supports']].concat(rows);
 }

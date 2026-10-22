@@ -311,7 +311,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <h2>Plans</h2>
         <p class="note">A plan groups orders and covert operations under one objective. Optional; up to five.</p>
         <div id="bkPlans"></div>
-        <button class="btn" type="button" id="bkPlanAdd">+ Add a plan</button>
+        <div class="bk-send" id="bkPlanBar"><select id="bkPlanPick"></select><button class="btn" type="button" id="bkPlanAdd">+ Add plan</button></div>
       </div>
       <div class="group two">
         <div><h2>Other covert orders</h2><p class="note">Seen only by the GM.</p><textarea class="bk-ta" id="bkCovert" rows="4"></textarea></div>
@@ -623,11 +623,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#bkPlans').innerHTML = BK.draft.plans.map(function (p, i) {
       return '<div class="bk-plan" data-p="' + i + '"><div class="h"><input data-pf="name" placeholder="Plan name" value="' + esc(p.name) + '"><button class="btn" type="button" data-pdel="' + i + '">Remove</button></div>' +
         '<input data-pf="objective" placeholder="Objective" value="' + esc(p.objective) + '">' +
+        (p.last || p.lastCovert ? '<details class="note"><summary>Last sent ' + esc(p.lastSent || '') + '</summary>' +
+          (p.last ? '<div style="white-space:pre-wrap">' + esc(p.last) + '</div>' : '') + (p.lastCovert ? '<div style="white-space:pre-wrap" class="muted">Covert: ' + esc(p.lastCovert) + '</div>' : '') + '</details>' : '') +
         '<textarea class="bk-ta" rows="3" data-pf="orders" placeholder="Orders under this plan, one per line">' + esc(p.orders) + '</textarea>' +
         '<textarea class="bk-ta" rows="2" data-pf="covert" placeholder="Covert orders under this plan (GM only)">' + esc(p.covert) + '</textarea>' +
         '<input data-pf="supports" placeholder="Which order the covert work supports (optional)" value="' + esc(p.supports) + '"></div>';
     }).join('');
-    $('#bkPlanAdd').hidden = BK.draft.plans.length >= 5;
+    $('#bkPlanBar').hidden = BK.draft.plans.length >= 5;
+    var inDraft = BK.draft.plans.map(function (p) { return String(p.name || '').trim().toLowerCase(); });
+    $('#bkPlanPick').innerHTML = '<option value="">A new plan</option>' + (BK.plans || []).filter(function (p) { return inDraft.indexOf(String(p['Plan']).toLowerCase()) < 0; })
+      .map(function (p, i) { return '<option value="' + esc(p['Plan']) + '">Continue: ' + esc(p['Plan']) + ' (last sent ' + esc(String(p['Last sent']).slice(0, 10)) + ')</option>'; }).join('');
   }
 
   function bkInit() {
@@ -649,7 +654,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     if (t.dataset && t.dataset.add) { BK.draft.rows.push({ verb: t.dataset.add, qty: 1 }); bkSave(); drawBasket(); return; }
     if (t.dataset && t.dataset.del != null) { BK.draft.rows.splice(+t.dataset.del, 1); bkSave(); drawBasket(); return; }
     if (t.dataset && t.dataset.pdel != null) { BK.draft.plans.splice(+t.dataset.pdel, 1); bkSave(); drawBasket(); return; }
-    if (t.id === 'bkPlanAdd') { BK.draft.plans.push({ name: '', objective: '', orders: '', covert: '', supports: '' }); bkSave(); drawBasket(); return; }
+    if (t.id === 'bkPlanAdd') {
+      var pick = $('#bkPlanPick').value, prev = (BK.plans || []).filter(function (p) { return p['Plan'] === pick; })[0];
+      // Continuing a plan carries its name and objective; last turn's orders are shown for reference, not re-sent.
+      BK.draft.plans.push(prev ? { name: prev['Plan'], objective: prev['Objective'], orders: '', covert: '', supports: '', last: prev['Last orders'], lastCovert: prev['Last covert orders'], lastSent: prev['Last sent'] }
+        : { name: '', objective: '', orders: '', covert: '', supports: '' });
+      bkSave(); drawBasket(); return;
+    }
     if (t.id === 'bkClear') {
       if (!t.dataset.armed) { t.dataset.armed = '1'; t.textContent = 'Press again to clear'; setTimeout(function () { delete t.dataset.armed; t.textContent = 'Clear draft'; }, 4000); return; }
       delete t.dataset.armed; t.textContent = 'Clear draft'; BK.draft = bkBlank(); BK.draft.__key = BK.key; bkStore(BK.key, null); drawBasket(); return;
@@ -1065,7 +1076,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function load() {
     VIEW = null;
     Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
-      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History')])
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans')])
       .then(function (r) {
         S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
         STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
@@ -1074,7 +1085,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
         reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
-        BK.sys = r[4]; BK.prices = priceRows; BK.reach = r[9]; BK.forces = r[6]; bkInit();
+        BK.sys = r[4]; BK.prices = priceRows; BK.plans = r[18] || []; BK.reach = r[9]; BK.forces = r[6]; bkInit();
         loaded = true;
         stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       })
