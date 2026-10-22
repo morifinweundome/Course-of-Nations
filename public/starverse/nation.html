@@ -613,11 +613,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     evs.forEach(function (e) { Object.keys(e.cost).forEach(function (k) { tot[k] = (tot[k] || 0) + e.cost[k]; }); Object.keys(e.strat).forEach(function (k) { tot[k] = (tot[k] || 0) + e.strat[k]; }); });
     var keys = MAIN.concat(BK_STRAT).filter(function (k) { return tot[k]; });
     var bad = evs.filter(function (e) { return e.cls === 'bad'; }).length;
-    $('#bkSum').innerHTML = (keys.length ? '<p class="note">Orders are paid at resolution, after this turn\'s income and upkeep, so they can spend more than is in stores today.</p>' +
-      '<div class="tbl"><table><thead><tr><th>Resource</th><th class="n">In stores</th><th class="n">Income less upkeep</th><th class="n">At resolution</th><th class="n">This basket</th><th class="n">Left</th></tr></thead><tbody>' +
+    $('#bkSum').innerHTML = (keys.length ? '<p class="note">This turn\'s earnings arrive before orders are paid, so a turn may spend more than the current stockpile.</p>' +
+      '<div class="tbl"><table><thead><tr><th>Resource</th><th class="n">Current stockpile</th><th class="n">Used this turn</th><th class="n">Earnings this turn</th><th class="n">Projected stockpile</th></tr></thead><tbody>' +
       keys.map(function (k) {
-        var st = STOCK[k] || {}, store = num(st['Stockpile']), avail = num(st['Projected']), net = avail - store, left = avail - tot[k];
-        return '<tr><td>' + ico(k) + esc(k) + '</td><td class="n">' + fmt(store) + '</td><td class="n">' + fmt(net, true) + '</td><td class="n">' + fmt(avail) + '</td><td class="n">' + fmt(tot[k]) +
+        var st = STOCK[k] || {}, store = num(st['Stockpile']), earn = num(st['Projected']) - store, left = store - tot[k] + earn;
+        return '<tr><td>' + ico(k) + esc(k) + '</td><td class="n">' + fmt(store) + '</td><td class="n">' + fmt(-tot[k], true) + '</td><td class="n">' + fmt(earn, true) +
           '</td><td class="n' + (left < 0 ? ' short' : '') + '">' + fmt(left) + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '') +
       (bad ? '<p class="warn bad">' + bad + ' order' + (bad === 1 ? '' : 's') + ' would be refused as written.</p>' : '');
