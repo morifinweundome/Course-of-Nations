@@ -253,16 +253,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
     <section id="p-plan" hidden>
       <div class="group">
-        <h2>Within reach</h2>
-        <p class="note" id="reachNote"></p>
-        <div class="fil" id="reachFil"></div>
-        <div id="reach"></div>
-      </div>
-      <div class="group">
         <h2>Price list</h2>
         <p class="note">What each order costs your nation, after its own modifiers. <span class="aff now">Now</span> can be paid from stores after the orders already costed; <span class="aff next">Next turn</span> once this turn's income is in.</p>
         <div class="fil" id="priceFil"></div>
         <div id="prices"></div>
+      </div>
+      <div class="group">
+        <h2>Within reach</h2>
+        <p class="note" id="reachNote"></p>
+        <div class="fil" id="reachFil"></div>
+        <div id="reach"></div>
       </div>
     </section>
 
@@ -397,6 +397,17 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     b.dataset.armed = '1'; b.textContent = 'Press again to resolve';
     setTimeout(function () { if (b.dataset.armed) { delete b.dataset.armed; b.textContent = 'Resolve'; } }, 5000);
     return false;
+  }
+
+  /* The price sheet's Buildings group is followed by the rules' constant tables
+     (rows from "Constants" or "Treasury constants" on); those are not prices. */
+  function cleanPrices(rows) {
+    var stop = false;
+    return rows.filter(function (r) {
+      if (r['Group'] !== 'Buildings') return true;
+      if (/^(Treasury )?constants$/i.test(String(r['Item'] || '').trim()) || r['Item'] === 'Constant') stop = true;
+      return !stop;
+    });
   }
 
   /* ---------- order basket ---------- */
@@ -1062,8 +1073,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawStatement(r[8]);
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
-        reachRows = r[9]; drawReach(); priceRows = r[10]; drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
-        BK.sys = r[4]; BK.prices = r[10]; BK.reach = r[9]; BK.forces = r[6]; bkInit();
+        reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
+        BK.sys = r[4]; BK.prices = priceRows; BK.reach = r[9]; BK.forces = r[6]; bkInit();
         loaded = true;
         stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       })
