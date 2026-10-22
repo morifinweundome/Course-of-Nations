@@ -58,9 +58,14 @@
  *   8. Filling an empty civic slot has no cost in the rules: always a ruling.
  *   9. Debt instalments are paid from Industry, Energy and Influence, largest first
  *      (the rules allow any resource; the sheet prices them all at 1 Mark).
- *  10. Population: migration between worlds (3% of crowded worlds) and between
- *      nations is not automated; growth uses Systems "Growth due" as it stood at
- *      the start of the resolution, so a colony founded this turn does not grow yet.
+ *  10. Population: settlement within a nation is automated (Settlement policy tab:
+ *      row ALL is the rule, a nation's row overrides it); migration between nations
+ *      is not. Growth uses Systems "Growth due" as it stood at the start of the
+ *      resolution, so a colony founded this turn does not grow yet.
+ *  12. GM-ruled per-turn effects live on the Standing effects tab and Imperial
+ *      successions on the Successions tab; both are applied by the resolver.
+ *  13. Extractors: one per deposit, recorded as "Extractor (<resource>)". Orbital
+ *      buildings (Habitat Station) take no planetary slot.
  *  11. In a dry run, Calculations cannot recalculate, so the Stability step uses the
  *      targets as they stood at the start of the run.
  *
@@ -92,7 +97,14 @@ var TURN_CONFIG = {
     'Rulings': ['Turn', 'Nation', 'Source', 'Item', 'Why it needs a ruling', 'Suggested ruling', 'GM decision', 'Status'],
     'Run log': ['Time', 'Function', 'Mode', 'Turn', 'Result', 'Detail'],
     'Preview': ['Run at', 'Tab', 'Row', 'Column', 'Before', 'After', 'Note'],
-    'Works in progress': ['Turn ordered', 'Nation', 'Kind', 'Item', 'System', 'Completes at end of turn', 'Action row', 'Status']
+    'Works in progress': ['Turn ordered', 'Nation', 'Kind', 'Item', 'System', 'Completes at end of turn', 'Action row', 'Status'],
+    // Per-turn effects the GM has ruled (research breakthroughs, standing orders). Rows with the same Group
+    // are applied together or not at all (e.g. a conversion's cost and its yield).
+    'Standing effects': ['Nation', 'Resource', 'Amount per turn', 'Phase', 'Reason', 'Working', 'From turn', 'Until turn', 'Group', 'Active', 'Source'],
+    // Settlement within a nation. Row "ALL" is the rule; a nation's own row overrides it.
+    'Settlement policy': ['Nation', 'Threshold (x capacity)', 'Share % a turn', 'Take whole excess', 'Reason'],
+    // Imperial successions. The latest row per nation dates the next one.
+    'Successions': ['Nation', 'Ruler', 'From turn', 'Note']
   },
 
   // Columns the script may write, by header text. '*' = any column.
@@ -106,7 +118,8 @@ var TURN_CONFIG = {
                'Ground Power', 'Static Defence', 'Note'],
     'Nations': ['Status', 'Government', 'Order–Liberty', 'Sacred–Secular', 'Martial–Pacific', 'Outward–Inward',
                 'Civic 1', 'Civic 2', 'Civic 3', 'Civic 4', 'Military tier', 'Industry tier', 'Society tier', 'Logistics tier'],
-    'Turn log': '*', 'Rulings': '*', 'Run log': '*', 'Works in progress': '*', 'Control': '*', 'Preview': '*'
+    'Turn log': '*', 'Rulings': '*', 'Run log': '*', 'Works in progress': '*', 'Control': '*', 'Preview': '*',
+    'Standing effects': '*', 'Settlement policy': '*', 'Successions': '*'
   },
 
   RESOURCES: ['Industry', 'Energy', 'Research', 'Influence'],
@@ -154,7 +167,7 @@ var TURN_CONFIG = {
   // Buildings the rules list that Tables!T_BUILD does not. T_BUILD wins where both exist.
   RULE_BUILDINGS: {
     'Military College':       { industry: 15, strat: {}, req: { military: 2 }, turns: 2, slot: true },
-    'Habitat Station':        { industry: 12, strat: {}, req: { society: 2 }, turns: 1, slot: true },
+    'Habitat Station':        { industry: 12, strat: {}, req: { society: 2 }, turns: 1, slot: false, orbital: true },  // orbital: takes no planetary slot (ruling, Turn 26)
     'Arcology':               { industry: 20, strat: { 'Lattice crystals': 1 }, req: { industry: 4, development: 3 }, turns: 2, slot: true },
     'Planetary Shield':       { industry: 20, strat: { 'Lattice crystals': 2 }, req: { military: 4 }, turns: 2, slot: true, installation: true },
     'Orbital Fortress':       { industry: 25, strat: { 'Adamant ore': 2 }, req: { military: 3 }, turns: 2, slot: true, installation: true },
@@ -567,12 +580,12 @@ function tpSplitSubmission_(sub, nid) {
     return String(text || '').split(/\r?\n/).map(function (s) { return s.replace(/^\s*(?:[-*•·]|\d+[.)])\s+/, '').trim(); })
       .filter(function (s) { return s; });
   }
-  lines(sub.routine).forEach(function (t) { out.push(tpMakeOrder_(t, 'Routine', '')); });
+  lines(sub.routine).forEach(function (t) { tpExpandList_(t).forEach(function (x) { out.push(tpMakeOrder_(x, 'Routine', '')); }); });
   sub.plans.forEach(function (p, i) {
     if (!p || !String(p).trim()) return;
     var plan = tpParsePlan_(String(p));
     var label = 'Plan ' + (i + 1) + ' "' + plan.name + '"' + (plan.objective ? ': ' + plan.objective : '');
-    plan.orders.forEach(function (t) { out.push(tpMakeOrder_(t, 'Plan ' + (i + 1), label)); });
+    plan.orders.forEach(function (t) { tpExpandList_(t).forEach(function (x) { out.push(tpMakeOrder_(x, 'Plan ' + (i + 1), label)); }); });
     if (plan.covert) {
       var o = { text: plan.covert, channel: 'Covert', verb: 'COVERT', planLabel: label, supports: plan.supports };
       out.push(o);
@@ -580,6 +593,15 @@ function tpSplitSubmission_(sub, nid) {
   });
   if (sub.covert && String(sub.covert).trim()) out.push({ text: String(sub.covert).trim(), channel: 'Covert', verb: 'COVERT', planLabel: 'No plan' });
   return out;
+}
+
+/** "COLONIZE C-04, II-05 and II-19" -> one order per system (COLONIZE, CONTACT, DEVELOP only). */
+function tpExpandList_(text) {
+  var m = String(text).match(/^\s*(COLONI[SZ]E|CONTACT|DEVELOP)\s*:?\s+(.+)$/i);
+  if (!m) return [text];
+  var items = m[2].split(/\s*(?:,|;|\band\b|&)\s*/i).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+  if (items.length < 2 || !items.every(function (x) { return /^(?:C|I|II|III|IV|V|VI)-\d{1,2}(?:\s+(?:to\s+)?\d)?$/i.test(x); })) return [text];
+  return items.map(function (x) { return m[1].toUpperCase() + ' ' + x; });
 }
 
 function tpMakeOrder_(text, channel, planLabel) {
@@ -732,7 +754,9 @@ function tpReady_(details, elab, cost, strat, spec, extra) {
 
 // ---------- DEVELOP <system> [level] ----------
 function tpEvDevelop_(world, sim, args) {
-  var m = args.match(/^(.*?)(?:\s+(?:to\s+)?(\d))?\s*$/i);
+  // Also reads "Raise C-04 to 4", "C-04: 4" and "C-04 to Development 4".
+  args = String(args).replace(/^\s*:\s*/, '').replace(/^(?:raise|level|lift|increase)\s+/i, '').replace(/[:,]/g, ' ').trim();
+  var m = args.match(/^(.*?)(?:\s+(?:to\s+)?(?:development\s+|level\s+)?(\d))?\s*$/i);
   var sys = world.findSystem(m[1]);
   if (!sys) return tpRuling_('System not found: "' + m[1] + '"', 'The script cannot find this system', 'Identify the system.');
   if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
@@ -766,6 +790,13 @@ function tpEvDesignate_(world, sim, args) {
     var re = new RegExp('(?:^|\\s|:)(?:as\\s+|to\\s+)?' + tpEscapeRe_(d) + '\\s*$', 'i');
     if (!found && re.test(args)) { found = d; rest = args.replace(re, '').replace(/[:,]\s*$/, ''); }
   });
+  if (!found) {
+    // Designation written first: "DESIGNATE Academy II-07".
+    desigs.forEach(function (d) {
+      var re2 = new RegExp('^\\s*:?\\s*' + tpEscapeRe_(d) + '\\s*(?:at|@|for|:)?\\s+', 'i');
+      if (!found && re2.test(args)) { found = d; rest = args.replace(re2, ''); }
+    });
+  }
   if (!found) return tpRuling_('Designation not recognised', 'No designation from the table at the end of the line', 'Identify the designation.');
   var sys = world.findSystem(rest);
   if (!sys) return tpRuling_('System not found: "' + rest + '"', 'The script cannot find this system', 'Identify the system.');
@@ -797,9 +828,16 @@ function tpEvBuild_(world, sim, args) {
   var p = tpSplitAt_(args);
   if (!p) return tpRuling_('No system given (write BUILD <building> @ <system>)', 'The system is missing', 'Identify the system.');
   var name = p.what.replace(/^(?:an?|the)\s+/i, '').trim();
+  // "Extractor (Living compounds)" or "Extractor for Living compounds" names the deposit worked.
+  var depositWanted = '';
+  var em = name.match(/^extractors?\s*(?:\(\s*([^)]+?)\s*\)|(?:for|on)\s+(.+))$/i);
+  if (em) { depositWanted = (em[1] || em[2] || '').trim(); name = 'Extractor'; }
   if (TURN_CONFIG.MEGAPROJECTS.some(function (mp) { return tpNorm_(mp) === tpNorm_(name); })) {
     return tpRuling_('Megaproject', 'Megaprojects are built over several turns under limits the GM checks', 'Check Megaprojects: requirements, cost paid when work begins, turns listed.');
   }
+  // "BUILD 1 Escort at IV-09": ships written under BUILD go to SHIP.
+  var shipQ = tpParseQty_(name);
+  if (!world.building(name) && world.shipCategory(shipQ.name)) return tpEvShip_(world, sim, args);
   var sys = world.findSystem(p.where);
   if (!sys) return tpRuling_('System not found: "' + p.where + '"', 'The script cannot find this system', 'Identify the system.');
   if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
@@ -807,12 +845,39 @@ function tpEvBuild_(world, sim, args) {
   if (sig) return tpEvSignatureWork_(world, sim, sys, sig);
   var b = world.building(name);
   if (!b) return tpRuling_('Building not recognised: "' + name + '"', 'Not in Tables or the rules', 'Identify the building or treat as lore.');
-  return tpBuildChecks_(world, sim, sys, b);
+  return tpBuildChecks_(world, sim, sys, b, depositWanted);
 }
 
-function tpBuildChecks_(world, sim, sys, b) {
+// Extractors: one per deposit, not one per system (ruling, Turn 26). Each is recorded
+// as "Extractor (<resource>)"; a legacy plain "Extractor" covers the first deposit
+// not otherwise covered.
+function tpExtractorPlan_(sys, existing, wanted) {
+  var deps = String(sys.get('Deposits') || '').split(/\s*;\s*/).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+  var covered = {}, plain = 0;
+  existing.forEach(function (x) {
+    var m = String(x).match(/^extractor\s*\(\s*([^)]+?)\s*\)$/i);
+    if (m) covered[tpNorm_(m[1])] = true; else if (tpNorm_(x) === 'extractor') plain++;
+  });
+  deps.forEach(function (d) { if (plain > 0 && !covered[tpNorm_(d)]) { covered[tpNorm_(d)] = true; plain--; } });
+  if (!deps.length) return { error: 'Requires a strategic deposit in the system' };
+  if (wanted) {
+    var hit = deps.filter(function (d) { return tpNorm_(d) === tpNorm_(wanted); })[0];
+    if (!hit) return { error: tpSysLabel_(sys) + ' has no ' + wanted + ' deposit (it holds ' + deps.join(' and ') + ')' };
+    if (covered[tpNorm_(hit)]) return { error: 'The ' + hit + ' deposit in ' + tpSysLabel_(sys) + ' already has an Extractor' };
+    return { deposit: hit };
+  }
+  var free = deps.filter(function (d) { return !covered[tpNorm_(d)]; });
+  if (!free.length) return { error: 'Every deposit in ' + tpSysLabel_(sys) + ' already has an Extractor; one per deposit' };
+  return { deposit: free[0], note: free.length > 1 ? 'works the ' + free[0] + ' deposit (name another in brackets to choose)' : '' };
+}
+
+function tpBuildChecks_(world, sim, sys, b, depositWanted) {
   var existing = sim.buildingsOf(sys.id);
-  if (existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
+  var isExtractor = tpNorm_(b.name) === 'extractor', plan = null;
+  if (isExtractor) {
+    plan = tpExtractorPlan_(sys, existing, depositWanted);
+    if (plan.error) return tpReject_(plan.error);
+  } else if (existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
   var r = b.req || {};
   var tiers = sim.tiers;
   if (r.military && tiers.Military < r.military) return tpReject_('Requires Military Tier ' + r.military);
@@ -822,7 +887,7 @@ function tpBuildChecks_(world, sim, sys, b) {
   if (r.development && tpNum_(sys.get('Development')) < r.development) return tpReject_('Requires Development ' + r.development);
   if (r.tradeHub && sim.desigOf(sys.id) !== 'Trade Hub') return tpReject_('Requires a Trade Hub designation');
   if (r.collective && sim.gov !== 'Collective') return tpReject_('Requires Collective government');
-  if (r.deposit && !String(sys.get('Deposits') || '').trim()) return tpReject_('Requires a strategic deposit in the system');
+  if (r.deposit && !isExtractor && !String(sys.get('Deposits') || '').trim()) return tpReject_('Requires a strategic deposit in the system');
   if (r.unknown) return tpRuling_('Requirement the script cannot read: ' + r.unknown, 'Unreadable requirement in Tables', 'Check the requirement.');
   var free = tpNum_(sys.get('Slots')) - tpNum_(sys.get('Slots used')) - (sim.slotsAdded[sys.id] || 0);
   if (b.slot !== false && free < 1) return tpReject_('No free building slot in ' + tpSysLabel_(sys));
@@ -830,10 +895,13 @@ function tpBuildChecks_(world, sim, sys, b) {
   var industry = b.name === 'Extractor' && ex !== '' && ex !== undefined && ex !== null ? tpNum_(ex) : b.industry;
   var notes = [];
   if (b.oncePerNation && sim.nationHasBuilding(b.name)) notes.push('counts once per nation: no further effect');
+  if (b.orbital) notes.push('orbital: takes no planetary slot');
+  var built = isExtractor ? 'Extractor (' + plan.deposit + ')' : b.name;
+  if (plan && plan.note) notes.push(plan.note);
   var turns = b.turns || 1;
-  return tpReady_(b.name + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : ''),
+  return tpReady_(built + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : ''),
     'Cost ' + industry + ' Industry' + (tpStratText_(b.strat) ? ' and ' + tpStratText_(b.strat) : '') + (notes.length ? '; ' + notes.join('; ') : ''),
-    { Industry: industry }, b.strat || {}, { type: 'BUILD', sys: sys.id, building: b.name, turns: turns });
+    { Industry: industry }, b.strat || {}, { type: 'BUILD', sys: sys.id, building: built, turns: turns, orbital: !!b.orbital });
 }
 
 function tpEvSignatureWork_(world, sim, sys, name) {
@@ -1270,7 +1338,7 @@ function tpCommitSim_(sim, ev) {
   switch (sp.type) {
     case 'DEVELOP': sim.devRaised[sp.sys] = sp.level; break;
     case 'DESIGNATE': sim.desigChanged[sp.sys] = sp.desig; sim.desigNow[sp.sys] = sp.desig; break;
-    case 'BUILD': sim.slotsAdded[sp.sys] = (sim.slotsAdded[sp.sys] || 0) + 1; (sim.newBuildings[sp.sys] = sim.newBuildings[sp.sys] || []).push(sp.building); break;
+    case 'BUILD': if (!sp.orbital) sim.slotsAdded[sp.sys] = (sim.slotsAdded[sp.sys] || 0) + 1; (sim.newBuildings[sp.sys] = sim.newBuildings[sp.sys] || []).push(sp.building); break;
     case 'SHIP': sim.shipCapAdded += ev.capAdd || 0; break;
     case 'GROUND': sim.armyCapAdded += ev.armyAdd || 0; break;
     case 'DEFENCE': sim.staticAdded[sp.sys] = (sim.staticAdded[sp.sys] || 0) + (sp.points || 0); break;
@@ -1373,9 +1441,11 @@ tpResolver_.prototype.run = function (dry) {
   this.phaseDiplomacy();
   this.phaseIncome();
   this.phaseUpkeep();
+  this.phaseStandingEffects();
   this.phaseSpending();
   this.phaseMovement();
   this.phasePopulation();
+  this.phaseSettlement();
   this.phaseWorldToll();
   this.phaseInfamy();
   this.phaseCompletions();
@@ -1814,8 +1884,115 @@ tpResolver_.prototype.phaseCompletions = function () {
 };
 
 // ---------------- Phase 9: Stability ----------------
+// ---------------- Standing effects (GM-ruled, every turn) ----------------
+tpResolver_.prototype.phaseStandingEffects = function () {
+  var self = this, w = this.world, turn = this.turn, T = this.model.tab('Standing effects');
+  var due = [];
+  T.rows().forEach(function (r) {
+    if (!/^y/i.test(String(T.get(r, 'Active')))) return;
+    var nid = String(T.get(r, 'Nation')).trim(), res = String(T.get(r, 'Resource')).trim(), amt = tpNum_(T.get(r, 'Amount per turn'));
+    var from = T.get(r, 'From turn'), until = T.get(r, 'Until turn');
+    if (!nid || !res || !amt) return;
+    if (from !== '' && turn < tpNum_(from)) return;
+    if (until !== '' && turn > tpNum_(until)) return;
+    var n = w.nation(nid);
+    if (!n || n.status === 'Eliminated') return;
+    due.push({ r: r + 1, nid: nid, res: res, amt: amt, phase: String(T.get(r, 'Phase') || '').trim() || (amt > 0 ? 'Income' : 'Upkeep'),
+      reason: String(T.get(r, 'Reason') || 'Standing effect'), working: String(T.get(r, 'Working') || ''), group: String(T.get(r, 'Group') || '').trim() });
+  });
+  var groups = {};
+  due.forEach(function (e) { var k = e.nid + '|' + (e.group || ('row' + e.r)); (groups[k] = groups[k] || []).push(e); });
+  Object.keys(groups).forEach(function (k) {
+    var list = groups[k], short = [];
+    // Every cost in the group must be payable from what the nation holds now.
+    var need = {};
+    list.forEach(function (e) { if (e.amt < 0) need[e.res] = (need[e.res] || 0) - e.amt; });
+    Object.keys(need).forEach(function (res) { if (w.stock(list[0].nid, res) + 1e-9 < need[res]) short.push(need[res] + ' ' + res); });
+    if (short.length) {
+      self.log('Standing effects', list[0].nid, 'Standing effect skipped', list[0].reason + ': not applied this turn, short of ' + short.join(' and '), 'No', '');
+      return;
+    }
+    list.forEach(function (e) {
+      self.ledger(e.phase, e.nid, e.res, e.amt, e.reason, (e.working ? e.working + '; ' : '') + 'Standing effects row ' + e.r, '');
+    });
+  });
+};
+
+// ---------------- Settlement within a nation ----------------
+tpResolver_.prototype.phaseSettlement = function () {
+  var self = this, w = this.world, Wt = w.worldsTab, P = this.model.tab('Settlement policy');
+  var policy = {};
+  P.rows().forEach(function (r) {
+    var nid = String(P.get(r, 'Nation')).trim(); if (!nid) return;
+    policy[nid] = { threshold: tpNum_(P.get(r, 'Threshold (x capacity)')) || 1.05, share: tpNum_(P.get(r, 'Share % a turn')),
+      excess: /^y/i.test(String(P.get(r, 'Take whole excess'))), reason: String(P.get(r, 'Reason') || '') };
+  });
+  var dflt = policy.ALL || { threshold: w.popConst('Overcrowding threshold (x capacity)', 1.05), share: w.popConst('Migration within a nation % a turn', 3), excess: false, reason: 'Migration within a nation' };
+  function mainRows(sid) { return w.worldRows(sid).filter(function (r) { return String(Wt.get(r, 'Habitable')) === 'Yes'; }); }
+  w.activeNations().forEach(function (n) {
+    var pol = policy[n.id] || dflt;
+    if (!pol.share && !pol.excess) return;
+    var sys = w.systems.filter(function (s) { return s.get('Owner') === n.id && !String(s.get('Status') || '').trim(); }).map(function (s) {
+      return { s: s, pop: w.systemPopulation(s.id), cap: tpNum_(s.get('Carrying capacity (bn)')) };
+    }).filter(function (x) { return x.cap > 0; });
+    sys.filter(function (x) { return x.pop >= pol.threshold * x.cap - 1e-9 && x.pop > 0; }).forEach(function (src) {
+      var amount = Math.max(src.pop * pol.share / 100, pol.excess ? src.pop - src.cap : 0);
+      var dests = sys.filter(function (x) { return x !== src && x.pop < x.cap; }).sort(function (a, b) { return a.pop / a.cap - b.pop / b.cap; });
+      var room = dests.reduce(function (t, x) { return t + (x.cap - x.pop); }, 0);
+      amount = tpRound2_(Math.min(amount, room));
+      if (amount < 0.01) return;
+      // Take from the source system's peopled worlds in proportion.
+      var srcRows = w.worldRows(src.s.id).filter(function (r) { return tpNum_(Wt.get(r, 'Population (bn)')) > 0; });
+      var srcTotal = srcRows.reduce(function (t, r) { return t + tpNum_(Wt.get(r, 'Population (bn)')); }, 0);
+      var taken = 0;
+      srcRows.forEach(function (r, i) {
+        var p = tpNum_(Wt.get(r, 'Population (bn)'));
+        var share = i === srcRows.length - 1 ? tpRound2_(amount - taken) : tpRound2_(amount * p / srcTotal);
+        taken = tpRound2_(taken + share);
+        Wt.set(r, 'Population (bn)', tpRound2_(p - share));
+      });
+      src.pop = tpRound2_(src.pop - amount);
+      // Fill the emptiest systems first, never past their capacity.
+      var left = amount, parts = [];
+      dests.forEach(function (d) {
+        if (left < 0.005) return;
+        var give = tpRound2_(Math.min(left, d.cap - d.pop));
+        if (give < 0.01) return;
+        var row = mainRows(d.s.id).filter(function (r) { return tpNum_(Wt.get(r, 'Population (bn)')) > 0; })[0] || mainRows(d.s.id)[0];
+        if (row === undefined) return;
+        Wt.set(row, 'Population (bn)', tpRound2_(tpNum_(Wt.get(row, 'Population (bn)')) + give));
+        d.pop = tpRound2_(d.pop + give); left = tpRound2_(left - give);
+        parts.push(w.label(d.s.id) + ' +' + give);
+      });
+      self.log('Population', n.id, 'Settlement', w.label(src.s.id) + ' (' + tpRound2_(src.pop + amount) + ' of ' + src.cap + ' bn) sends ' + tpRound2_(amount - left) + ' bn: ' + parts.join(', ') + (pol.reason ? ' [' + pol.reason + ']' : ''), 'No', '');
+    });
+  });
+};
+
+// ---------------- Imperial succession ----------------
+tpResolver_.prototype.phaseSuccession = function () {
+  var self = this, w = this.world, turn = this.turn, S = this.model.tab('Successions');
+  w.activeNations().forEach(function (n) {
+    if (n.gov !== 'Imperial') return;
+    if (/Necrophage/i.test(String(n.bio || ''))) return;   // ageless rulers: abdication, coup or assassination only
+    var traits = String(n.traits || '');
+    var every = /Long-lived/i.test(traits) ? 20 : /Short-lived/i.test(traits) ? 6 : 10;
+    var last = 0;
+    S.rows().forEach(function (r) { if (String(S.get(r, 'Nation')).trim() === n.id) last = Math.max(last, tpNum_(S.get(r, 'From turn'))); });
+    var dueAt = last + every;
+    if (turn >= dueAt) {
+      self.ledger('Stability', n.id, 'Stability', -2, 'Imperial succession', 'The ruler changes every ' + every + ' turns (last change Turn ' + last + ')', '');
+      S.add('Nation', { 'Nation': n.id, 'Ruler': '(heir to be named)', 'From turn': turn, 'Note': 'Succession applied by the turn script' });
+      self.log('Stability', n.id, 'Succession', 'Imperial succession: a new ruler takes the throne (-2 Stability). GM: record the heir on the Successions tab.', 'Yes', '');
+    } else if (turn + 1 === dueAt) {
+      self.log('Stability', n.id, 'Succession due', 'Imperial succession falls due next turn (Turn ' + dueAt + '): ask the player to name the heir.', 'No', '');
+    }
+  });
+};
+
 tpResolver_.prototype.phaseStability = function () {
   var self = this, w = this.world;
+  this.phaseSuccession();
   w.activeNations().forEach(function (n) {
     var c = w.calc(n.id);
     if (!c) return;
@@ -2512,8 +2689,11 @@ function tpNormHeader_(s) { return tpNorm_(s).replace(/[–—]/g, '-'); }
 function tpFindKey_(obj, name) { var t = tpNorm_(name); return Object.keys(obj).filter(function (k) { return tpNorm_(k) === t; })[0] || null; }
 function tpSysLabel_(s) { var nm = s.get('Name'); return nm ? nm + ' (' + s.id + ')' : s.id; }
 function tpSplitAt_(args) {
-  var m = String(args).match(/^(.*?)\s*(?:@|\bat\b|\bin\b)\s*(.+)$/i);
-  return m ? { what: m[1].trim(), where: m[2].trim() } : null;
+  // Accepts "X @ Y", "X at/in/on Y" and "X: Y". '@' wins where present; otherwise the
+  // last at/in/on, so "Extractor on Living compounds at C-11" splits at "at".
+  var t = String(args).replace(/^\s*:\s*/, '').trim();
+  var m = t.match(/^(.*)@\s*(.+)$/) || t.match(/^(.*)\s(?:at|in|on)\s+(.+)$/i) || t.match(/^(.*?)\s*:\s*(.+)$/);
+  return m && m[1].trim() ? { what: m[1].trim().replace(/[:,]\s*$/, ''), where: m[2].trim() } : null;
 }
 function tpParseQty_(text) {
   var t = String(text).trim(), n = 1;
