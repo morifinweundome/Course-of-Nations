@@ -183,7 +183,6 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <div class="stamp" id="stamp"><span class="dot"></span><span id="stampText">Reading your record…</span></div>
       </div>
       <div class="acts">
-        <a class="btn gold" id="orders" target="_blank" rel="noopener" aria-disabled="true">✦ Send orders</a>
         <a class="btn" id="gmap" href="map.html" target="si-galaxy">Galactic map</a>
       </div>
     </div>
@@ -770,9 +769,6 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#lede').innerHTML = (kv('Government') ? '<span>' + ico(kv('Government')) + esc(kv('Government')) + '</span>' : '') +
       (kv('Player') ? '<span class="p">Led by ' + esc(kv('Player')) + '</span>' : '') +
       (kv('Status') && kv('Status') !== 'Active' ? '<span class="pill wait">' + esc(kv('Status')) + '</span>' : '');
-    var o = $('#orders');
-    o.href = '#write'; o.removeAttribute('target'); o.removeAttribute('aria-disabled');
-    o.onclick = function (e) { e.preventDefault(); var t = document.querySelector('.tab[data-p="write"]'); if (t) { t.click(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
     // Both maps open the site's own map, which reads this game's chart; the private one adds your worlds.
     var mapUrl = location.origin + '/starverse/map.html?game=' + encodeURIComponent(GAME);
     var feedId = (String(kv('Private map link')).match(/feed=([\w-]+)/) || [])[1];
