@@ -1895,7 +1895,7 @@ tpResolver_.prototype.phasePopulation = function () {
     var desc = [];
     rows.forEach(function (r) {
       var p = tpNum_(w.worldsTab.get(r, 'Population (bn)'));
-      var np = tpRound2_(p + g * p / total);
+      var np = tpRound3_(p + g * p / total);   // to the million: small worlds' growth is not rounded away
       w.worldsTab.set(r, 'Population (bn)', np);
       desc.push(w.worldsTab.get(r, 'World') + ' ' + p + ' -> ' + np);
     });
@@ -2167,9 +2167,9 @@ tpResolver_.prototype.phaseSettlement = function () {
       var taken = 0;
       srcRows.forEach(function (r, i) {
         var p = tpNum_(Wt.get(r, 'Population (bn)'));
-        var share = i === srcRows.length - 1 ? tpRound2_(amount - taken) : tpRound2_(amount * p / srcTotal);
-        taken = tpRound2_(taken + share);
-        Wt.set(r, 'Population (bn)', tpRound2_(p - share));
+        var share = i === srcRows.length - 1 ? tpRound3_(amount - taken) : tpRound3_(amount * p / srcTotal);
+        taken = tpRound3_(taken + share);
+        Wt.set(r, 'Population (bn)', tpRound3_(p - share));
       });
       src.pop = tpRound2_(src.pop - amount);
       // Fill the emptiest systems first, never past their capacity.
@@ -2180,7 +2180,7 @@ tpResolver_.prototype.phaseSettlement = function () {
         if (give < 0.01) return;
         var row = mainRows(d.s.id).filter(function (r) { return tpNum_(Wt.get(r, 'Population (bn)')) > 0; })[0] || mainRows(d.s.id)[0];
         if (row === undefined) return;
-        Wt.set(row, 'Population (bn)', tpRound2_(tpNum_(Wt.get(row, 'Population (bn)')) + give));
+        Wt.set(row, 'Population (bn)', tpRound3_(tpNum_(Wt.get(row, 'Population (bn)')) + give));
         d.pop = tpRound2_(d.pop + give); left = tpRound2_(left - give);
         parts.push(w.label(d.s.id) + ' +' + give);
       });
@@ -2572,16 +2572,16 @@ tpWorld_.prototype.moveSettlers = function (nid, toSys, amount) {
   var total = src.reduce(function (t, x) { return t + x[1]; }, 0);
   var taken = 0, parts = [];
   src.forEach(function (x, i) {
-    var share = i === src.length - 1 ? tpRound2_(amount - taken) : tpRound2_(amount * x[1] / total);
-    taken = tpRound2_(taken + share);
-    var np = tpRound2_(x[1] - share);
+    var share = i === src.length - 1 ? tpRound3_(amount - taken) : tpRound3_(amount * x[1] / total);
+    taken = tpRound3_(taken + share);
+    var np = tpRound3_(x[1] - share);
     Wt.set(x[0], 'Population (bn)', np);
     parts.push(Wt.get(x[0], 'World') + ' ' + x[1] + ' -> ' + np);
   });
   var dest = this.worldRows(toSys).filter(function (r) { return String(Wt.get(r, 'Habitable')) === 'Yes'; })[0];
   var S = this.sys(toSys);
   if (dest) {
-    Wt.set(dest, 'Population (bn)', tpRound2_(tpNum_(Wt.get(dest, 'Population (bn)')) + amount));
+    Wt.set(dest, 'Population (bn)', tpRound3_(tpNum_(Wt.get(dest, 'Population (bn)')) + amount));
     Wt.set(dest, 'Settled', 'Yes');
   } else {
     Wt.add('System ID', { 'System ID': toSys, 'World': S.get('Name') || toSys, 'Kind': '', 'Environment': S.get('Environment') || '',
@@ -2984,6 +2984,7 @@ function tpFmtDate_(d) {
 // =====================================================================
 function tpNum_(v) { if (v === '' || v === null || v === undefined) return 0; var n = Number(v); return isFinite(n) ? n : 0; }
 function tpRound1_(x) { return Math.round((x + (x >= 0 ? 1e-9 : -1e-9)) * 10) / 10; }
+function tpRound3_(x) { return Math.round((x + (x >= 0 ? 1e-9 : -1e-9)) * 1000) / 1000; }
 function tpRound2_(x) { return Math.round((x + (x >= 0 ? 1e-9 : -1e-9)) * 100) / 100; }
 function tpRoundHalfUp_(x) { return Math.floor(x + 0.5 + 1e-9); }
 function tpSigned_(x) { return (x >= 0 ? '+' : '') + tpRound2_(x); }
