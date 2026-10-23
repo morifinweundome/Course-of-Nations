@@ -131,7 +131,7 @@ var TURN_CONFIG = {
   },
   // The Galactic Exchange (rules, The Treasury). Marks are the Ledger resource below.
   MARKS: 'Stellar Marks',
-  EXCHANGE: { s: 0.5, spread: 0.1, e: 0.5, smooth: 0.1, floor: 0.25, ceiling: 5, hoard: 0.4, kMain: 2, kStrat: 12,
+  EXCHANGE: { s: 0.5, spread: 0.1, e: 0.5, smooth: 0.1, floor: 0.25, ceiling: 5, hoard: 0.4,
     depthMinMain: 10, depthMinStrat: 5, capShare: 0.25, glut: 2, base: { Industry: 1, Energy: 1, Research: 2, Influence: 1 }, baseStrat: 10 },
 
   RESOURCES: ['Industry', 'Energy', 'Research', 'Influence'],
@@ -2125,8 +2125,9 @@ tpResolver_.prototype.phaseExchange = function () {
     var x = st[res], fl = w.exFlows(res, turn), strat = TURN_CONFIG.STRATEGIC.indexOf(res) >= 0;
     var openBuys = 0;
     X.rows().forEach(function (r) { if (X.get(r, 'Status') === 'Open' && X.get(r, 'Side') === 'BUY' && X.get(r, 'Resource') === res) openBuys += tpNum_(X.get(r, 'Remaining')); });
-    var demand = fl.spent + openBuys, supply = fl.income + x.inventory + 0.1 * fl.stock, k = strat ? C.kStrat : C.kMain;
-    var target = demand <= 0 && supply <= 0 ? x.base : supply > 0 ? x.base * Math.pow(Math.max(demand, 0.01) / (supply / k), C.e) : x.base * C.ceiling;
+    // Target = Base x (Demand / Supply) ^ e: balance holds the base price (ruling, 23 Oct 2026; the divisor k was dropped).
+    var demand = fl.spent + openBuys, supply = fl.income + x.inventory + 0.1 * fl.stock;
+    var target = demand <= 0 && supply <= 0 ? x.base : supply > 0 ? x.base * Math.pow(Math.max(demand, 0.01) / supply, C.e) : x.base * C.ceiling;
     target = Math.max(x.base * C.floor, Math.min(x.base * C.ceiling, target));
     // Trades walk the price within the turn only; the published price moves at most 10% a turn toward its target.
     var p0 = opening[res], step = Math.max(-C.smooth * p0, Math.min(C.smooth * p0, target - p0));
