@@ -2015,7 +2015,7 @@ tpResolver_.prototype.phaseStandingEffects = function () {
 
 // ---------------- Synthesis Works (each turn, before Spending) ----------------
 // A Works runs 1 batch at Development 1-2, 2 at 3-4, 3 at 5. Each batch takes one unit of each input
-// and yields one unit (1.5 for an exceptional variant). Short of inputs, it runs the batches it can.
+// and yields one unit (2 for an exceptional variant). Short of inputs, it runs the batches it can.
 tpResolver_.prototype.phaseSynthesis = function () {
   var self = this, w = this.world;
   w.systems.forEach(function (s) {
@@ -2028,8 +2028,8 @@ tpResolver_.prototype.phaseSynthesis = function () {
       var can = want;
       rc.inputs.forEach(function (inp) { can = Math.min(can, Math.floor(w.stock(nid, inp) + 1e-9)); });
       if (can <= 0) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ' made no ' + rc.name + ': short of ' + rc.inputs.join(' or '), 'No', ''); return; }
-      var made = tpRound2_(can * (rc.exceptional ? 1.5 : 1)), why = 'Synthesis Works at ' + label + ' (' + rc.name + ')';
-      var working = can + ' batch' + (can === 1 ? '' : 'es') + ' of ' + want + ' (Development ' + dev + ')' + (rc.exceptional ? '; exceptional variant x1.5' : '') + (can < want ? '; short of inputs' : '');
+      var made = tpRound2_(can * (rc.exceptional ? 2 : 1)), why = 'Synthesis Works at ' + label + ' (' + rc.name + ')';
+      var working = can + ' batch' + (can === 1 ? '' : 'es') + ' of ' + want + ' (Development ' + dev + ')' + (rc.exceptional ? '; exceptional variant x2' : '') + (can < want ? '; short of inputs' : '');
       rc.inputs.forEach(function (inp) { self.ledger('Spending', nid, inp, -can, why, working, ''); });
       self.ledger('Income', nid, rc.name, made, why, working, '');
     });
