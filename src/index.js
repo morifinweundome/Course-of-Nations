@@ -5,6 +5,7 @@
 
 import { GAMES, findGame } from "./games.js";
 import { sign, verify, getCookie, cookie } from "./session.js";
+import { GM_REFERENCE, SYNTHESIS } from "./gm_pages.js";
 
 const SESSION_COOKIE = "con_session";
 const STATE_COOKIE = "con_state";
@@ -219,6 +220,27 @@ async function api(request, env, url) {
   return json({ error: "Not found." }, 404);
 }
 
+// ---- GM-only pages: served to the GM alone, never from /public ----
+// The page bodies are stored encrypted (AES-GCM); only the Worker, holding GM_PAGES_KEY, can read them.
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function decryptPage(blob, keyB64) {
+  const [iv, data] = blob.split(".");
+  const key = await crypto.subtle.importKey("raw", b64(keyB64.trim()), "AES-GCM", false, ["decrypt"]);
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(iv) }, key, b64(data)));
+}
+async function gmPage(request, env, url) {
+  const user = await currentUser(request, env);
+  const head = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" };
+  if (!isGM(user, env)) {
+    const body = user ? "<p>This page is not available.</p>" : '<p>Sign in first: <a href="/auth/login">sign in with Discord</a>, then return to this link.</p>';
+    return new Response("<!doctype html><meta charset=utf-8><title>Course of Nations</title><body style=\"background:#0B1220;color:#E6EAF2;font:16px system-ui;padding:40px\">" + body,
+      { status: user ? 404 : 401, headers: { ...head, "Content-Type": "text/html; charset=utf-8" } });
+  }
+  if (!env.GM_PAGES_KEY) return new Response("GM pages are not configured yet: add the GM_PAGES_KEY secret.", { status: 503, headers: head });
+  const html = await decryptPage(url.pathname === "/gm/reference" ? GM_REFERENCE : SYNTHESIS, env.GM_PAGES_KEY);
+  return new Response(html, { headers: { ...head, "Content-Type": "text/html; charset=utf-8" } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -227,6 +249,7 @@ export default {
       if (url.pathname === "/auth/callback") return callback(request, env);
       if (url.pathname === "/auth/logout") return logout();
       if (url.pathname.startsWith("/api/")) return api(request, env, url);
+      if (url.pathname === "/gm/reference" || url.pathname === "/gm/synthesis") return gmPage(request, env, url);
       return env.ASSETS.fetch(request);
     } catch (err) {
       return json({ error: "Server error." }, 500);
