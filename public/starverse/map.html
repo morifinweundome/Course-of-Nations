@@ -85,6 +85,10 @@ a{color:var(--steel)}
 #card .wl span{color:var(--muted);font-size:11.5px;margin-left:auto;text-align:right}
 #card .wl i{font-style:normal;color:var(--steel);font-size:10.5px;width:14px;text-align:right}
 #card .wnote{font-size:11px;color:var(--muted);margin:6px 0 0}
+#card .slots{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:7px}#card .slots b{color:var(--bright)}
+#card .wks{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:5px}
+#card .wk{padding:2px 8px;border-radius:6px;border:1px solid var(--line2);background:#0C1420;color:var(--chrome);font-size:11.5px}
+#card .wks .ok{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);margin-right:2px}
 #wtip{position:fixed;z-index:7;pointer-events:none;max-width:260px;padding:9px 11px;border-radius:9px;background:var(--panel2);border:1px solid var(--steel);font-size:12px;color:var(--text);display:none;line-height:1.45;box-shadow:0 8px 26px rgba(0,0,0,.45)}
 #wtip h5{margin:0 0 3px;font-size:13px;color:var(--bright)}
 #wtip .k{color:var(--steel);font-size:11px;margin-bottom:5px}
@@ -538,6 +542,24 @@ function worldsSection(s) {
     `<li class="wl" tabindex="0" data-i="${i}"><i>${esc(w.orbit || '')}</i><b>${esc(w.name)}</b><span>${esc(w.kind || '')}${num(w.pop) ? ' · ' + esc(popText(w.pop)) : ''}</span></li>`).join('')}</ul>
     ${MODE === 'gm' ? '' : '<p class="wnote">Shown only through your private link.</p>'}</div>`;
 }
+/* ---------- a nation's own works and slots (private link only) ---------- */
+let WORKS = new Map();
+const ORBITAL = ['Habitat Station'];
+function worksSection(s) {
+  const o = WORKS.get(s.id); if (!o) return '';
+  const all = String(o.buildings || '').split(/\s*,\s*/).filter(Boolean);
+  const orb = all.filter(b => ORBITAL.includes(b)), ground = all.filter(b => !ORBITAL.includes(b));
+  const slots = num(o.slots), used = num(o.used) + (o.wip || []).filter(b => !ORBITAL.includes(b)).length, free = Math.max(0, slots - used);
+  const chips = l => l.map(b => `<span class="wk">${esc(b)}</span>`).join('');
+  const oSlots = o.oslots !== undefined && o.oslots !== '' ? num(o.oslots) : 1 + (num(o.dev) >= 4 ? 1 : 0);
+  const oFree = Math.max(0, oSlots - orb.length - (o.wip || []).filter(b => ORBITAL.includes(b)).length);
+  return `<div class="sec"><h4>Works${o.dev ? ' · Development ' + esc(o.dev) : ''}</h4>
+    <div class="slots"><span><b>${free}</b> of ${slots} building slot${slots === 1 ? '' : 's'} free</span><span><b>${oFree}</b> of ${oSlots} orbital slot${oSlots === 1 ? '' : 's'} free</span></div>
+    ${ground.length ? `<div class="wks">${chips(ground)}</div>` : '<p class="wnote" style="margin:4px 0 0">No buildings yet.</p>'}
+    ${orb.length ? `<div class="wks"><span class="ok">In orbit</span>${chips(orb)}</div>` : ''}
+    ${o.wip ? `<div class="wks"><span class="ok">Under way</span>${chips(o.wip)}</div>` : ''}
+    <p class="wnote">Orbital works take an orbital slot: one per system, two from Development 4. Each building stands once per system.</p></div>`;
+}
 function worldTip(w) {
   const row = (k, v) => v ? `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>` : '';
   const out = ['Industry', 'Energy', 'Research', 'Influence'].map(k => num(w[k]) ? `${num(w[k])} ${k}` : '').filter(Boolean).join(' · ');
@@ -590,7 +612,7 @@ function card(s) {
     <h2>${esc(s.name || (s.charted ? 'Unnamed system' : 'Uncharted system'))}</h2>
     <div class="own">${s.owner ? `<span class="sw" style="background:${s.colour};color:${s.colour}"></span>Held by ${esc(s.owner)}` : '<span style="color:var(--muted)">Unclaimed</span>'}</div>
     ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
-    ${body}${worldsSection(s)}${gm}
+    ${body}${worksSection(s)}${worldsSection(s)}${gm}
     <div class="sec"><h4>Hyperlanes · ${s.adj.length}</h4>${s.adj.map(a => { const t = byId.get(a); return `<button class="jump" data-id="${esc(a)}">${t.name ? esc(t.name) + ' · ' : ''}${esc(a)}</button>`; }).join('')}</div>`;
   $('#card').classList.add('on');
   $('#card .x').onclick = closeCard;
@@ -763,7 +785,15 @@ function feedKey() {
 async function privateFeed() {
   const k = feedKey(); if (!k) return;
   try {
-    const t = await fetch(`https://docs.google.com/spreadsheets/d/${k}/gviz/tq?tqx=out:csv&headers=1&sheet=Worlds&t=${Date.now()}`).then(r => { if (!r.ok) throw r.status; return r.text(); });
+    const g = sh => fetch(`https://docs.google.com/spreadsheets/d/${k}/gviz/tq?tqx=out:csv&headers=1&sheet=${sh}&t=${Date.now()}`).then(r => { if (!r.ok) throw r.status; return r.text(); });
+    Promise.all([g('Systems'), g('Works').catch(() => '')]).then(([sy, wk]) => {
+      if (/^\s*</.test(sy)) return;
+      const wip = {};
+      if (wk && !/^\s*</.test(wk)) objects(parseCSV(wk)).forEach(o => { if (o['System'] && o['Kind'] === 'Building') (wip[o['System']] = wip[o['System']] || []).push(o['Item']); });
+      WORKS = new Map(objects(parseCSV(sy)).filter(o => o['System ID']).map(o => [o['System ID'], { buildings: o['Buildings'], slots: o['Slots'], used: o['Slots used'], dev: o['Development'], oslots: o['Orbital slots'], wip: wip[o['System ID']] }]));
+      if (selected && byId.get(selected)) card(byId.get(selected));
+    }).catch(() => {});
+    const t = await g('Worlds');
     if (/^\s*</.test(t)) throw 'not shared';
     setWorlds(objects(parseCSV(t)).map(o => ({ sys: o['System ID'], name: o['World'], orbit: o['Orbit'], kind: o['Kind'], env: o['Environment'], habitable: o['Habitable'], settled: o['Settled'],
       pop: o['Population (bn)'], buildings: o['Buildings here'], Industry: o['Industry'], Energy: o['Energy'], Research: o['Research'], Influence: o['Influence'], desc: o['Description'] })));
