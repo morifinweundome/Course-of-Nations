@@ -442,9 +442,15 @@ function pfExtras_(W, n, rec, ss) {
     var cap = f.num('Capacity');
     if (cap > 0) { var fu = Math.ceil(cap / 4), wa = Math.ceil(cap / 4); fuelT += fu; wageT += wa; U.push([f.get('Name') || f.get('Force ID'), fu, wa, f.num('Dreadnoughts') ? f.num('Dreadnoughts') + ' Volatile isotopes' : '']); }
   });
-  var totalE = c.num('Upkeep Energy'), totalI = c.num('Upkeep Influence');
-  var rest = r1(totalE + totalI - fuelT - wageT);
-  if (rest > 0.05) U.push(['Armies, defences and installations', '', '', rest + ' (wages and power)']);
+  // ground formations burn no fuel; their wages run about 1 Mark per 4 Ground Power (none under Citizen Militia)
+  var gp = 0, sd = 0;
+  W.forces.forEach(function (f) { if (f.get('Owner') === id) { gp += f.num('Ground Power'); sd += f.num('Static Defence'); } });
+  var militia = /Citizen Militia/.test([n.get('Civic 1'), n.get('Civic 2'), n.get('Civic 3'), n.get('Civic 4'), n.get('Civics')].join(' '));
+  if (gp > 0) U.push(['Ground formations', '', militia ? 0 : Math.ceil(gp / 4), militia ? 'Citizen Militia: no wages' : '']);
+  if (sd > 0) U.push(['Static Defence', '', Math.ceil(sd / 4), '']);
+  var totalI = c.num('Upkeep Influence');
+  if (totalI > 0.05) U.push(['Treaties and charters', '', '', r1(totalI) + ' Influence']);
+  U.push(['Wages are paid in Marks, or in Industry, Energy and Influence at 1 a Mark, from your largest stockpiles first', '', '', '']);
   rec.Upkeep = U;
 
   // ---- stability

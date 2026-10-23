@@ -35,8 +35,10 @@
  *      per formation (Infantry 0.25 ...); Static Defence 1 Mark per 4 points;
  *      installations as listed. The worked first turn pays 2 Energy fuel and 3 Marks
  *      wages from Industry. Calculations!X instead charges ROUNDUP(capacity/2) +
- *      ROUNDUP(Ground Power/4), all as Energy, with no Static Defence or installation
- *      wages. The script charges Calculations!X to Energy.
+ *      ROUNDUP(Ground Power/4), all as Energy. From Turn 34 (designer's ruling, 23 Oct 2026) the script follows
+ *      the rules: Calculations!X is fuel only, 1 Energy per 4 capacity rounded up per fleet; wages (ships
+ *      1 per 4 capacity per fleet, ground about 1 per 4 Ground Power, Static Defence 1 per 4) are charged
+ *      separately, in Marks or Industry, Energy and Influence, from the largest stockpiles first.
  *   2. Ground formations. Forces records one "Ground Power" number per row, not
  *      formations. New formations add their defence value to Ground Power and are
  *      listed in the Note column; Army Capacity is checked against Ground Power.
@@ -1731,8 +1733,30 @@ tpResolver_.prototype.phaseUpkeep = function () {
       self.ledger('Upkeep', n.id, 'Stability', -1, 'Failing to pay upkeep', 'Disbanded ' + dis.text, '');
       U = dis.U; W = dis.W; X = dis.upkeep;
     }
-    if (X) self.ledger('Upkeep', n.id, 'Energy', -X, 'Upkeep of forces',
-      'Ship capacity ' + U + ' -> ROUNDUP(' + U + '/2) = ' + Math.ceil(U / 2) + (militia ? '; Citizen Militia: no ground wages' : '; Ground Power ' + W + ' -> ROUNDUP(' + W + '/4) = ' + Math.ceil(W / 4)) + ' (Calculations Upkeep Energy)', '');
+    if (X) self.ledger('Upkeep', n.id, 'Energy', -X, 'Fuel for the fleets',
+      '1 Energy per 4 ship capacity, rounded up per fleet (ship capacity ' + U + '; Calculations Upkeep Energy)', '');
+    // Wages: 1 Mark per 4 ship capacity (rounded up per fleet), ground formations about 1 per 4 Ground Power
+    // (none under Citizen Militia), Static Defence 1 per 4 points. Paid in Marks or Industry, Energy and
+    // Influence at 1 a Mark, from the largest stockpiles first.
+    var own = w.forceList().filter(function (f) { return f.owner === n.id; });
+    var shipW = own.reduce(function (t, f) { var cap = tpNum_(w.forcesTab.get(f.row, 'Escorts')) + 2.5 * tpNum_(w.forcesTab.get(f.row, 'Cruisers')) + 4.5 * tpNum_(w.forcesTab.get(f.row, 'Battleships')) + 10 * tpNum_(w.forcesTab.get(f.row, 'Dreadnoughts')); return t + Math.ceil(cap / 4); }, 0);
+    var groundW = militia ? 0 : Math.ceil(W / 4);
+    var sdW = Math.ceil(own.reduce(function (t, f) { return t + f.staticDefence; }, 0) / 4);
+    var wages = shipW + groundW + sdW;
+    if (wages > 0) {
+      var M = TURN_CONFIG.MARKS, src = [M, 'Industry', 'Energy', 'Influence'].map(function (r) {
+        var have = w.stock(n.id, r) - (r === 'Energy' ? X : 0);
+        return { r: r, have: Math.max(0, tpRound2_(have)) };
+      }).sort(function (a, b2) { return b2.have - a.have; });
+      var due = wages, paid = [];
+      src.forEach(function (x) { if (due <= 1e-9 || x.have <= 0) return; var take = tpRound2_(Math.min(due, x.have)); due = tpRound2_(due - take); paid.push([x.r, take]); });
+      var wk = 'Ships ' + shipW + (groundW ? ', ground formations ' + groundW : (militia ? ', ground formations 0 (Citizen Militia)' : '')) + (sdW ? ', Static Defence ' + sdW : '') + ' = ' + wages + ' Marks, paid from the largest stockpiles first';
+      paid.forEach(function (pr) { self.ledger('Upkeep', n.id, pr[0], -pr[1], 'Wages of the forces', wk, ''); });
+      if (due > 1e-9) {
+        self.log('Upkeep', n.id, 'Wages unpaid', due + ' Marks of wages unpaid: the GM disbands ground formations, then ships, to fit', 'No', '');
+        self.ledger('Upkeep', n.id, 'Stability', -1, 'Failing to pay wages', due + ' Marks unpaid', '');
+      }
+    }
     if (Y) {
       var iso = w.stock(n.id, 'Volatile isotopes');
       if (Y > iso) {
@@ -2642,13 +2666,13 @@ tpWorld_.prototype.defenceRowAt = function (nid, sid) {
   var row = this.forcesTab.add('Force ID', { 'Force ID': id, 'Owner': nid, 'Name': 'Defences at ' + this.label(sid), 'Location': sid, 'Static Defence': 0 });
   return { row: row, id: id };
 };
-/** Disbands ships, smallest first, then ground formations, until the sheet's upkeep formula fits the Energy held. */
+/** Disbands ships, smallest first, until the fleets' fuel fits the Energy held. */
 tpWorld_.prototype.disbandFor = function (nid, energy, militia) {
   var F = this.forcesTab, self = this;
   var forces = this.forceList().filter(function (f) { return f.owner === nid; });
   var U = forces.reduce(function (t, f) { return t + tpNum_(F.get(f.row, 'Escorts')) + 2.5 * tpNum_(F.get(f.row, 'Cruisers')) + 4.5 * tpNum_(F.get(f.row, 'Battleships')) + 10 * tpNum_(F.get(f.row, 'Dreadnoughts')); }, 0);
   var W = forces.reduce(function (t, f) { return t + f.groundPower; }, 0);
-  function upkeep() { return Math.ceil(U / 2) + (militia ? 0 : Math.ceil(W / 4)); }
+  function upkeep() { return Math.ceil(U / 4); }   // fuel only; ground formations burn no fuel
   var gone = [];
   var order = [['Escorts', 1], ['Cruisers', 2.5], ['Battleships', 4.5], ['Dreadnoughts', 10]];
   for (var i = 0; i < order.length && upkeep() > energy; i++) {
