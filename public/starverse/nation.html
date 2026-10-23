@@ -323,6 +323,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <button class="btn" type="button" id="bkClear">Clear draft</button>
         <span class="gmstatus" id="bkStatus"></span>
         <p class="note">Sending replaces any earlier submission for this turn. The order form remains available as a fallback: <a id="bkForm" target="_blank" rel="noopener">open the form</a>.</p>
+        <p class="note">Finished works for the Galactic Archives (lore, art, histories) go in through the <a id="arcForm" target="_blank" rel="noopener">archive form</a>.</p>
       </div>
     </section>
     <section id="p-ask" hidden>
@@ -657,6 +658,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     }
     $('#wTurn').hidden = false; $('#wTurn').textContent = 'Turn ' + turn;
     if (kv('Order form link')) $('#bkForm').href = kv('Order form link');
+    $('#arcForm').href = kv('Archive form link') || ('https://docs.google.com/forms/d/e/1FAIpQLSc2HZpd_z0vQBFFxG4uGi0KzNIhUYftdKY_ErA9wl8ymmbl6Q/viewform?usp=pp_url&entry.1892272541=' + encodeURIComponent(kv('Nation') || ''));
     $('#bkAdd').innerHTML = BK_VERBS.map(function (v) { return '<button type="button" data-add="' + v[0] + '">+ ' + esc(v[1]) + '</button>'; }).join('');
     drawBasket();
   }
