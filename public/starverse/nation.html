@@ -123,6 +123,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .warn{border-left:3px solid var(--warn);padding:10px 14px;background:rgba(242,199,107,.07);border-radius:0 10px 10px 0;margin:0 0 10px;font-size:14px}
 .warn.bad{border-left-color:var(--down);background:rgba(229,138,138,.08)}
 .okline{color:var(--muted);font-size:14px;font-style:italic}
+.ev{display:grid;gap:10px}
+.evc{background:linear-gradient(165deg,var(--band2),var(--band1));border:1px solid var(--line2);border-left:3px solid var(--steel);border-radius:12px;padding:12px 16px}
+.evc .k{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;gap:8px;align-items:center}
+.evc .h{font-weight:700;color:var(--bright);margin:3px 0 2px}
+.evc .b{font-size:14px;color:var(--text);white-space:pre-line}
+.evc.gold{border-left-color:var(--gold)}.evc.up{border-left-color:var(--up)}.evc.down{border-left-color:var(--down)}.evc.muted{border-left-color:var(--line)}
+.evarc{margin-top:12px}.evarc summary{cursor:pointer;color:var(--chrome);font-weight:700;font-size:14px;padding:6px 0}
+.evarc h3{font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 8px}
 .aff{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
 .aff.now{border-color:#2f6b4a;color:#9be3b8}.aff.next{border-color:#8a6a2a;color:#FBE7B5}.aff.no{border-color:#7a3434;color:#F3B5B5}.aff.lock{color:var(--muted)}
 .fil{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
@@ -213,6 +221,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <h2>Stockpiles</h2>
         <p class="note" id="stockNote"></p>
         <div class="res" id="main4"></div>
+      </div>
+      <div class="group">
+        <h2>Events</h2>
+        <p class="note" id="evNote"></p>
+        <div id="events"></div>
       </div>
       <div class="group">
         <h2>Five-turn outlook</h2>
@@ -1110,6 +1123,29 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#debts').innerHTML = table(debts, [{ k: 'Direction' }, { k: 'With' }, { k: 'Outstanding (SM)', n: 1 }, { k: 'Instalment (SM)', n: 1 }, { k: 'Instalments due', n: 1 }, { k: 'Arrears (SM)', n: 1 }], { empty: 'No debts, owed or owing.' });
   }
 
+  function drawEvents(rows) {
+    var TONE = { 'First contact': 'gold', 'Natives': 'up', 'Treaty proposed': '', 'Treaty signed': 'up', 'Treaty ended': 'down', 'Breakthrough': 'gold', "Scholars' brief": 'gold',
+      'War': 'down', 'Revolt': 'down', 'Succession': 'muted', 'Notice': 'muted' };
+    var ev = (rows || []).filter(function (r) { return r['Title']; })
+      .sort(function (a, b) { return num(b['Turn']) - num(a['Turn']); });
+    if (!ev.length) { $('#evNote').textContent = ''; $('#events').innerHTML = '<div class="none">Nothing has reached your court yet: no contacts, treaties or discoveries on record.</div>'; return; }
+    var last = num(ev[0]['Turn']);
+    var card = function (r) {
+      return '<div class="evc ' + (TONE[r['Kind']] || '') + '"><div class="k"><span>' + esc(r['Kind'] || 'Notice') + '</span><span>Turn ' + esc(r['Turn']) + '</span></div>' +
+        '<div class="h">' + esc(r['Title']) + '</div>' + (r['Text'] ? '<div class="b">' + esc(r['Text']) + '</div>' : '') + '</div>';
+    };
+    var now = ev.filter(function (r) { return num(r['Turn']) === last; }), old = ev.filter(function (r) { return num(r['Turn']) !== last; });
+    $('#evNote').textContent = 'Contacts, natives, treaties and discoveries. Turn ' + last + ' first; earlier turns below.';
+    var html = '<div class="ev">' + now.map(card).join('') + '</div>';
+    if (old.length) {
+      var by = {}, order = [];
+      old.forEach(function (r) { var t = r['Turn']; if (!by[t]) { by[t] = []; order.push(t); } by[t].push(r); });
+      html += '<details class="evarc"><summary>Earlier turns (' + old.length + ')</summary>' +
+        order.map(function (t) { return '<h3>Turn ' + esc(t) + '</h3><div class="ev">' + by[t].map(card).join('') + '</div>'; }).join('') + '</details>';
+    }
+    $('#events').innerHTML = html;
+  }
+
   function stamp(kind, text, retry) {
     $('#stamp').className = 'stamp ' + kind; $('#stampText').textContent = text;
     var old = $('#stamp button'); if (old) old.remove();
@@ -1119,7 +1155,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function load() {
     VIEW = null;
     Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
-      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans')])
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events')])
       .then(function (r) {
         S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
         STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
@@ -1127,7 +1163,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawStatement(r[8]);
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
-        reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]);
+        reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]); drawEvents(r[19]);
         BK.sys = r[4]; BK.prices = priceRows; BK.plans = r[18] || []; BK.reach = r[9]; BK.forces = r[6]; bkInit();
         loaded = true; loadAsk();
         stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));

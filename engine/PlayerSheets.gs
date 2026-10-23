@@ -84,7 +84,8 @@ function pfWorkbook_(book) {
     wip: pfRows_(pfTab_(book, 'Works in progress')),
     lanes: pfRows_(pfTab_(book, 'Lanes')), treaties: pfRows_(pfTab_(book, 'Treaties')),
     debts: pfRows_(pfTab_(book, 'Debts')), inbox: pfRows_(pfTab_(book, 'Orders inbox')),
-    tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control'))
+    tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control')),
+    events: pfRows_(pfTab_(book, 'Events')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
   };
   W.nations.forEach(function (n) { n.id = n.get('Nation ID'); });
   pfRows_(pfTab_(book, 'Calculations')).forEach(function (c) { W.calc[c.get('Nation ID')] = c; });
@@ -148,6 +149,13 @@ function pfShare_(id) {
 
 /* ------------------------------------------------------------------ one nation's record */
 
+/** Strips the GM's working (seeds, ruling references, hand-application notes) from a log line. */
+function pfClean_(t) {
+  return String(t || '')
+    .replace(/\s*\([^()]*(seed|Rulings row|GM ruling|GM Reference|applied by hand)[^()]*\)/gi, '')
+    .replace(/\s*Applied by hand[^.]*\.?/gi, '')
+    .replace(/\s+([.,;])/g, '$1').trim();
+}
 function pfRound_(x) { return Math.round(x * 10) / 10; }
 
 function pfStrat_(text) {
@@ -458,6 +466,26 @@ function pfExtras_(W, n, rec, ss) {
   var C = [['Nation', 'Nation ID', 'Known through']];
   Object.keys(met).forEach(function (o) { if (natName[o]) C.push([natName[o], o, met[o]]); });
   rec.Contacts = C;
+
+  // ---- events: the GM's Events tab, plus public Turn log lines that name this nation
+  var E = [['Turn', 'Kind', 'Title', 'Text']];
+  var names = function (s) { return String(s || '').split(/\s*[,;]\s*/); };
+  W.events.forEach(function (e) {
+    if (!e.get('Title') || e.get('Shown to player') === 'No') return;
+    var p = names(e.get('Nations'));
+    if (p.indexOf(id) < 0 && !/^all$/i.test(e.get('Nations'))) return;
+    E.push([e.get('Turn'), e.get('Kind') || 'Notice', e.get('Title'), e.get('Text')]);
+  });
+  var AUTO = { 'Native world joined': 'Natives', 'Treaty': 'Treaty signed', 'Trade': 'Treaty signed', 'Battle': 'War', 'Ground battle': 'War',
+    'Breakaway': 'Revolt', 'Revolt': 'Revolt', 'Succession': 'Succession' };
+  W.turnlog.forEach(function (l) {
+    var k = AUTO[l.get('Event')];
+    if (!k || l.get('Public') !== 'Yes' || names(l.get('Nations')).indexOf(id) < 0) return;
+    var d = pfClean_(l.get('Description')), m = d.match(/^(.{12,140}?[.:])\s+(.*)$/);
+    E.push([l.get('Turn'), k, m ? m[1].replace(/[.:]$/, '') : d, m ? m[2] : '']);
+  });
+  E = [E[0]].concat(E.slice(1).sort(function (a, b) { return Number(b[0]) - Number(a[0]); }).slice(0, 120));
+  rec.Events = E;
 
   // ---- history: one line per turn, kept across refreshes
   var H = [['Turn', 'Industry', 'Energy', 'Research', 'Influence', 'Stability', 'Systems held', 'Fleet Power', 'Population (bn)', 'GDP (SM)']];
