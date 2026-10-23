@@ -2014,8 +2014,8 @@ tpResolver_.prototype.phaseStandingEffects = function () {
 };
 
 // ---------------- Synthesis Works (each turn, before Spending) ----------------
-// A Works runs 1 batch at Development 1-2, 2 at 3-4, 3 at 5. Each batch takes one unit of each input
-// and yields one unit (2 for an exceptional variant). Short of inputs, it runs the batches it can.
+// Each turn a Works takes one unit of each input and yields 1 at Development 1-2, 2 at 3-4, 3 at 5
+// (2, 4 or 6 for an exceptional variant). Short of an input, it makes nothing that turn.
 tpResolver_.prototype.phaseSynthesis = function () {
   var self = this, w = this.world;
   w.systems.forEach(function (s) {
@@ -2024,12 +2024,12 @@ tpResolver_.prototype.phaseSynthesis = function () {
       var m = bn.match(/^Synthesis Works\s*\(\s*(.+?)\s*\)$/i); if (!m) return;
       var label = tpSysLabel_(s), rc = w.recipe(nid, m[1]);
       if (!rc || rc.inputs.length < 2) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ': no recipe "' + m[1] + '" on record for ' + nid, 'No', ''); return; }
-      var dev = tpNum_(s.get('Development')), want = dev >= 5 ? 3 : dev >= 3 ? 2 : dev >= 1 ? 1 : 0;
-      var can = want;
+      var dev = tpNum_(s.get('Development')), tier = dev >= 5 ? 3 : dev >= 3 ? 2 : dev >= 1 ? 1 : 0;
+      var can = tier > 0 ? 1 : 0;
       rc.inputs.forEach(function (inp) { can = Math.min(can, Math.floor(w.stock(nid, inp) + 1e-9)); });
       if (can <= 0) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ' made no ' + rc.name + ': short of ' + rc.inputs.join(' or '), 'No', ''); return; }
-      var made = tpRound2_(can * (rc.exceptional ? 2 : 1)), why = 'Synthesis Works at ' + label + ' (' + rc.name + ')';
-      var working = can + ' batch' + (can === 1 ? '' : 'es') + ' of ' + want + ' (Development ' + dev + ')' + (rc.exceptional ? '; exceptional variant x2' : '') + (can < want ? '; short of inputs' : '');
+      var made = tier * (rc.exceptional ? 2 : 1), why = 'Synthesis Works at ' + label + ' (' + rc.name + ')';
+      var working = '1 of each input -> ' + made + ' (Development ' + dev + (rc.exceptional ? ', exceptional variant x2' : '') + ')';
       rc.inputs.forEach(function (inp) { self.ledger('Spending', nid, inp, -can, why, working, ''); });
       self.ledger('Income', nid, rc.name, made, why, working, '');
     });
