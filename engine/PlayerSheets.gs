@@ -86,7 +86,7 @@ function pfWorkbook_(book) {
     lanes: pfRows_(pfTab_(book, 'Lanes')), treaties: pfRows_(pfTab_(book, 'Treaties')),
     debts: pfRows_(pfTab_(book, 'Debts')), inbox: pfRows_(pfTab_(book, 'Orders inbox')),
     tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control')),
-    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
+    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), unlocks: pfRows_(pfTab_(book, 'Unlocks')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
   };
   W.nations.forEach(function (n) { n.id = n.get('Nation ID'); });
   pfRows_(pfTab_(book, 'Calculations')).forEach(function (c) { W.calc[c.get('Nation ID')] = c; });
@@ -410,6 +410,13 @@ function pfExtras_(W, n, rec, ss) {
     P.push(['Ships', r['Category'], r1(Number(r['Industry']) * shipF), '', '', '', st, r['Requires'] || '', pfMeets_(r['Requires'], tiers) ? 'Yes' : 'No', 'Fleet Power ' + r['Fleet Power'] + ', capacity ' + r['Capacity']]);
   });
   PF_GROUND.forEach(function (g) { P.push(['Ground formations', g[0], g[1], '', '', '', g[2], g[3], pfMeets_(g[3], tiers) ? 'Yes' : 'No', 'Wages ' + g[4] + (g[4] === 1 ? ' Mark' : ' Marks') + ' a turn; capacity ' + g[5]]); });
+  // hidden buildings this nation has unlocked (Unlocks tab): listed for it alone
+  W.unlocks.forEach(function (u) {
+    if (u.get('Nation') !== id || !u.get('Building') || u.get('Shown to player') === 'No') return;
+    var slot = /^n/i.test(u.get('Takes a slot')) ? 'takes no building slot' : 'takes a building slot';
+    P.push(['Buildings', u.get('Building'), u.get('Industry'), '', '', '', u.get('Strategic'), u.get('Requires'), pfMeets_(u.get('Requires'), tiers) ? 'Yes' : 'No',
+      [u.get('Effect'), slot, u.get('Strain') ? 'Strain ' + u.get('Strain') : '', Number(u.get('Turns')) > 1 ? 'takes ' + u.get('Turns') + ' turns' : ''].filter(String).join('; ')]);
+  });
   pfBlock_(W.tables, 'Buildings').forEach(function (r) {
     P.push(['Buildings', r['Building'], r['Industry'], '', '', '', r['Other cost'] || '', r['Requires'] || '', pfMeets_(r['Requires'], tiers) ? 'Yes' : 'No', r['Effect'] || '']);
   });

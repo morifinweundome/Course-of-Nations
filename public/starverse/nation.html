@@ -502,7 +502,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       case 'BUILD': {
         var b = bkBuildings().filter(function (x) { return x.Item === r.what; })[0], s = bkSys(r.sys);
         if (!b || !s) { bad('Choose a building and a system.'); break; }
-        var name = b.Item + (b.Item === 'Extractor' && r.res ? ' (' + r.res + ')' : '');
+        if (b.Item === 'Synthesis Works' && !r.res) { bad('Choose the recipe this Works will make.'); break; }
+        var name = b.Item + ((b.Item === 'Extractor' || b.Item === 'Synthesis Works') && r.res ? ' (' + r.res + ')' : '');
         out.text = 'BUILD ' + name + ' @ ' + s['System ID'];
         out.cost.Industry = num(b.Industry); out.strat = bkStratParse(b.Strategic);
         var have = String(s['Buildings'] || '').split(/\s*,\s*/).filter(Boolean);
@@ -511,7 +512,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         else if (r.what === 'Extractor') {
           if (r.res && have.indexOf('Extractor (' + r.res + ')') >= 0) bad('An Extractor already works that deposit here.');
           else if (dupBasket) bad('Already in your basket.');
-        } else if (have.some(function (h) { return h === b.Item; }) || dupBasket) bad(b.Item + ' already stands (or is ordered) in ' + s['System ID'] + '; once per system.');
+        } else if (have.some(function (h) { return h === b.Item || h.replace(/\s*\(.*\)\s*$/, '') === b.Item; }) || dupBasket) bad(b.Item + ' already stands (or is ordered) in ' + s['System ID'] + '; once per system.');
         if (!out.cls && b.once === 'nation' && (BK.sys.some(function (x) { return String(x['Buildings']).indexOf(b.Item) >= 0; }) || others.some(function (x) { return x.verb === 'BUILD' && x.what === b.Item; })))
           bad(b.Item + ' counts once per nation, and you already hold one.');
         if (!out.cls && !b.orbital) {
@@ -613,7 +614,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       case 'BUILD':
         f = '<select data-f="what">' + bkOpt(bkBuildings().map(function (b) { return [b.Item, b.Item + (b.locked ? ' (locked)' : '')]; }), r.what, 'Building…') + '</select> @ ' +
           '<select data-f="sys">' + bkOpt(BK.sys.map(function (s) { var fr = num(s['Slots']) - num(s['Slots used']); return [s['System ID'], bkSysLabel(s) + ' · ' + fr + ' free']; }), r.sys, 'System…') + '</select>' +
-          (r.what === 'Extractor' ? ' <select data-f="res">' + bkOpt(BK_STRAT, r.res, 'Deposit (first uncovered)') + '</select>' : '');
+          (r.what === 'Extractor' ? ' <select data-f="res">' + bkOpt(BK_STRAT, r.res, 'Deposit (first uncovered)') + '</select>' : '') +
+          (r.what === 'Synthesis Works' ? ' making <select data-f="res">' + bkOpt((RECIPES || []).filter(function (x) { return !/building/i.test(x['Yields'] || ''); }).map(function (x) { return x['Recipe']; }), r.res, 'Recipe…') + '</select>' : '');
         break;
       case 'DEVELOP':
         f = '<select data-f="what">' + bkOpt(BK.prices.filter(function (p) { return p['Group'] === 'Development'; }).map(function (p) { return p['Item']; }), r.what, 'World to raise…') + '</select>';

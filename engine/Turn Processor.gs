@@ -104,7 +104,11 @@ var TURN_CONFIG = {
     // Settlement within a nation. Row "ALL" is the rule; a nation's own row overrides it.
     'Settlement policy': ['Nation', 'Threshold (x capacity)', 'Share % a turn', 'Take whole excess', 'Reason'],
     // Imperial successions. The latest row per nation dates the next one.
-    'Successions': ['Nation', 'Ruler', 'From turn', 'Note']
+    'Successions': ['Nation', 'Ruler', 'From turn', 'Note'],
+    // Hidden buildings a nation has unlocked (by discovery, ruling or licence). Only that nation may build them.
+    'Unlocks': ['Nation', 'Building', 'Industry', 'Strategic', 'Requires', 'Takes a slot', 'Turns', 'Strain', 'Effect', 'Unlocked (turn)', 'Shown to player'],
+    // Recipes each nation holds (advanced materials). A Synthesis Works makes one of them.
+    'Recipes': ['Nation', 'Recipe', 'Yields', 'Inputs', 'Variant', 'Effect', 'Learned (turn)', 'How learned', 'Shown to player']
   },
 
   // Columns the script may write, by header text. '*' = any column.
@@ -843,6 +847,9 @@ function tpEvBuild_(world, sim, args) {
   if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
   var sig = tpFindKey_(TURN_CONFIG.SIGNATURE_WORKS, name);
   if (sig) return tpEvSignatureWork_(world, sim, sys, sig);
+  var ub = world.unlockedBuilding(sim.nid, name);
+  if (ub && ub.error) return tpReject_(ub.error);
+  if (ub) return tpBuildChecks_(world, sim, sys, ub, depositWanted);
   var b = world.building(name);
   if (!b) return tpRuling_('Building not recognised: "' + name + '"', 'Not in Tables or the rules', 'Identify the building or treat as lore.');
   return tpBuildChecks_(world, sim, sys, b, depositWanted);
@@ -877,7 +884,7 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted) {
   if (isExtractor) {
     plan = tpExtractorPlan_(sys, existing, depositWanted);
     if (plan.error) return tpReject_(plan.error);
-  } else if (existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
+  } else if (existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name) || tpNorm_(String(x).replace(/\s*\(.*\)\s*$/, '')) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
   var r = b.req || {};
   var tiers = sim.tiers;
   if (r.military && tiers.Military < r.military) return tpReject_('Requires Military Tier ' + r.military);
@@ -896,7 +903,7 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted) {
   var notes = [];
   if (b.oncePerNation && sim.nationHasBuilding(b.name)) notes.push('counts once per nation: no further effect');
   if (b.orbital) notes.push('orbital: takes no planetary slot');
-  var built = isExtractor ? 'Extractor (' + plan.deposit + ')' : b.name;
+  var built = isExtractor ? 'Extractor (' + plan.deposit + ')' : (b.builtName || b.name);
   if (plan && plan.note) notes.push(plan.note);
   var turns = b.turns || 1;
   return tpReady_(built + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : ''),
@@ -1443,6 +1450,7 @@ tpResolver_.prototype.run = function (dry) {
   this.phaseIncome();
   this.phaseUpkeep();
   this.phaseStandingEffects();
+  this.phaseSynthesis();
   this.phaseSpending();
   this.phaseMovement();
   this.phasePopulation();
@@ -1933,6 +1941,29 @@ tpResolver_.prototype.phaseStandingEffects = function () {
   });
 };
 
+// ---------------- Synthesis Works (each turn, before Spending) ----------------
+// A Works runs 1 batch at Development 1-2, 2 at 3-4, 3 at 5. Each batch takes one unit of each input
+// and yields one unit (1.5 for an exceptional variant). Short of inputs, it runs the batches it can.
+tpResolver_.prototype.phaseSynthesis = function () {
+  var self = this, w = this.world;
+  w.systems.forEach(function (s) {
+    var nid = s.get('Owner'); if (!nid || String(s.get('Status') || '').trim()) return;
+    String(s.get('Buildings') || '').split(/\s*,\s*/).forEach(function (bn) {
+      var m = bn.match(/^Synthesis Works\s*\(\s*(.+?)\s*\)$/i); if (!m) return;
+      var label = tpSysLabel_(s), rc = w.recipe(nid, m[1]);
+      if (!rc || rc.inputs.length < 2) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ': no recipe "' + m[1] + '" on record for ' + nid, 'No', ''); return; }
+      var dev = tpNum_(s.get('Development')), want = dev >= 5 ? 3 : dev >= 3 ? 2 : dev >= 1 ? 1 : 0;
+      var can = want;
+      rc.inputs.forEach(function (inp) { can = Math.min(can, Math.floor(w.stock(nid, inp) + 1e-9)); });
+      if (can <= 0) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ' made no ' + rc.name + ': short of ' + rc.inputs.join(' or '), 'No', ''); return; }
+      var made = tpRound2_(can * (rc.exceptional ? 1.5 : 1)), why = 'Synthesis Works at ' + label + ' (' + rc.name + ')';
+      var working = can + ' batch' + (can === 1 ? '' : 'es') + ' of ' + want + ' (Development ' + dev + ')' + (rc.exceptional ? '; exceptional variant x1.5' : '') + (can < want ? '; short of inputs' : '');
+      rc.inputs.forEach(function (inp) { self.ledger('Spending', nid, inp, -can, why, working, ''); });
+      self.ledger('Income', nid, rc.name, made, why, working, '');
+    });
+  });
+};
+
 // ---------------- Settlement within a nation ----------------
 tpResolver_.prototype.phaseSettlement = function () {
   var self = this, w = this.world, Wt = w.worldsTab, P = this.model.tab('Settlement policy');
@@ -2184,6 +2215,38 @@ tpWorld_.prototype.building = function (name) {
   }
   var key = tpNorm_(name);
   return this.tables.build[key] || this.tables.build[key.replace(/s$/, '')] || null;
+};
+// Hidden buildings unlocked for one nation (Unlocks tab). "Synthesis Works (<recipe>)" names the recipe it makes.
+tpWorld_.prototype.unlockedBuilding = function (nid, name) {
+  var m = String(name).match(/^(.*?)\s*(?:\(\s*(?:making\s+)?([^)]+?)\s*\)|[\u2014\u2013-]+\s*(?:making\s+)?(.+)|\s+making\s+(.+))$/i);
+  var base = m ? m[1] : String(name), recipe = m ? (m[2] || m[3] || m[4] || '').trim() : '';
+  var U = this.model.tab('Unlocks'), hit = null;
+  U.rows().forEach(function (r) { if (hit === null && String(U.get(r, 'Nation')).trim() === nid && tpNorm_(U.get(r, 'Building')) === tpNorm_(name)) { hit = r; base = String(name); recipe = ''; } });
+  U.rows().forEach(function (r) {
+    if (hit !== null || String(U.get(r, 'Nation')).trim() !== nid) return;
+    var bn = String(U.get(r, 'Building')).trim();
+    if (bn && (tpNorm_(bn) === tpNorm_(base) || tpNorm_(bn) === tpNorm_(base).replace(/s$/, ''))) hit = r;
+  });
+  if (hit === null) return null;
+  var b = { name: String(U.get(hit, 'Building')).trim(), industry: tpNum_(U.get(hit, 'Industry')), strat: tpParseStrat_(U.get(hit, 'Strategic')),
+    req: tpParseReq_(U.get(hit, 'Requires')), turns: tpNum_(U.get(hit, 'Turns')) || 1, slot: !/^n/i.test(String(U.get(hit, 'Takes a slot'))), unlocked: true };
+  if (/^synthesis works$/i.test(b.name)) {
+    if (!recipe) return { error: 'Name the recipe the Works will make, e.g. BUILD Synthesis Works (Reactor Alloy) @ <system>' };
+    var rc = this.recipe(nid, recipe);
+    if (!rc || /building/i.test(rc.yields)) return { error: 'Not a material recipe this nation holds: ' + recipe };
+    b.builtName = 'Synthesis Works (' + rc.name + ')';
+  }
+  return b;
+};
+tpWorld_.prototype.recipe = function (nid, name) {
+  var R = this.model.tab('Recipes'), out = null;
+  R.rows().forEach(function (r) {
+    if (out || String(R.get(r, 'Nation')).trim() !== nid || tpNorm_(R.get(r, 'Recipe')) !== tpNorm_(name)) return;
+    var inputs = String(R.get(r, 'Inputs') || '').split(/\s*\+\s*/).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+    out = { name: String(R.get(r, 'Recipe')).trim(), yields: String(R.get(r, 'Yields') || 'Material'), inputs: inputs,
+      exceptional: /exceptional/i.test(String(R.get(r, 'Variant') || '')) };
+  });
+  return out;
 };
 tpWorld_.prototype.shipCategory = function (name) {
   if (!this.tables.ships) {
