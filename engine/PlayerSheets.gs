@@ -24,6 +24,7 @@ var PF_MASTER_FOLDER = '1blvHnwAMiM7OGsOc0-eoHAZ3FpmF454C';   // the Master's re
 var PF_SANDBOX_FOLDER = '14aPkKlSxfuOn1k2u6RmiDqTgKg-ftK0J';  // the GM Folder, for sandbox records
 var PF_MAIN = ['Industry', 'Energy', 'Research', 'Influence'];
 var PF_STRAT = ['Adamant ore', 'Lattice crystals', 'Antimatter', 'Volatile isotopes', 'Living compounds', 'Void matter'];
+var PF_ADV = [];   // advanced materials: every material named on the Recipes tab (set by pfWorkbook_)
 
 /* ------------------------------------------------------------------ entry points */
 
@@ -85,13 +86,15 @@ function pfWorkbook_(book) {
     lanes: pfRows_(pfTab_(book, 'Lanes')), treaties: pfRows_(pfTab_(book, 'Treaties')),
     debts: pfRows_(pfTab_(book, 'Debts')), inbox: pfRows_(pfTab_(book, 'Orders inbox')),
     tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control')),
-    events: pfRows_(pfTab_(book, 'Events')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
+    events: pfRows_(pfTab_(book, 'Events')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
   };
   W.nations.forEach(function (n) { n.id = n.get('Nation ID'); });
   pfRows_(pfTab_(book, 'Calculations')).forEach(function (c) { W.calc[c.get('Nation ID')] = c; });
   W.sysName = {}; W.systems.forEach(function (s) { W.sysName[s.get('System ID')] = s.get('Name'); });
   W.turn = 0;
   W.ledger.forEach(function (l) { W.turn = Math.max(W.turn, l.num('Turn')); });
+  PF_ADV = [];
+  W.recipes.forEach(function (r) { var m = r.get('Recipe'); if (m && !/building/i.test(r.get('Yields')) && PF_ADV.indexOf(m) < 0) PF_ADV.push(m); });
   W.actionTurn = 0;
   W.actions.forEach(function (a) { if (a.get('Nation')) W.actionTurn = Math.max(W.actionTurn, a.num('Turn')); });
   return W;
@@ -162,7 +165,7 @@ function pfStrat_(text) {
   var out = {};
   String(text || '').split(/\s*[;,]\s*/).forEach(function (p) {
     var m = p.match(/^(-?[\d.]+)\s+(.+)$/); if (!m) return;
-    var k = PF_STRAT.filter(function (s) { return s.toLowerCase() === m[2].toLowerCase() || s.toLowerCase().replace(/s$/, '') === m[2].toLowerCase(); })[0];
+    var k = PF_STRAT.concat(PF_ADV).filter(function (s) { return s.toLowerCase() === m[2].toLowerCase() || s.toLowerCase().replace(/s$/, '') === m[2].toLowerCase(); })[0];
     if (k) out[k] = (out[k] || 0) + parseFloat(m[1]);
   });
   return out;
@@ -190,6 +193,14 @@ function pfRecord_(W, n) {
     var s = n.num(k), inc = income[k] || 0, up = upkeep[k] || 0, com = committed[k] || 0;
     var net = inc - up - com;
     stock.push([k, PF_MAIN.indexOf(k) >= 0 ? 'Main' : 'Strategic', pfRound_(s), pfRound_(inc), pfRound_(up), pfRound_(com), pfRound_(net), pfRound_(s + net)]);
+  });
+  // advanced materials: held as the sum of this nation's Ledger lines for each material
+  PF_ADV.forEach(function (k) {
+    var s = 0, seen = false;
+    W.ledger.forEach(function (l) { if (l.get('Nation') === id && l.get('Resource').toLowerCase() === k.toLowerCase()) { s += l.num('Amount'); seen = true; } });
+    var com = committed[k] || 0;
+    if (!seen && !com) return;
+    stock.push([k, 'Advanced', pfRound_(s), 0, 0, pfRound_(com), pfRound_(-com), pfRound_(s - com)]);
   });
 
   // the sheet: who the nation is and how it stands
@@ -486,6 +497,14 @@ function pfExtras_(W, n, rec, ss) {
   });
   E = [E[0]].concat(E.slice(1).sort(function (a, b) { return Number(b[0]) - Number(a[0]); }).slice(0, 120));
   rec.Events = E;
+
+  // ---- recipes this nation holds (never another nation's)
+  var RC = [['Recipe', 'Yields', 'Inputs', 'Variant', 'Effect', 'Learned (turn)']];
+  W.recipes.forEach(function (r) {
+    if (r.get('Nation') !== id || !r.get('Recipe') || r.get('Shown to player') === 'No') return;
+    RC.push([r.get('Recipe'), r.get('Yields'), r.get('Inputs'), r.get('Variant'), r.get('Effect'), r.get('Learned (turn)')]);
+  });
+  rec.Recipes = RC;
 
   // ---- history: one line per turn, kept across refreshes
   var H = [['Turn', 'Industry', 'Energy', 'Research', 'Influence', 'Stability', 'Systems held', 'Fleet Power', 'Population (bn)', 'GDP (SM)']];

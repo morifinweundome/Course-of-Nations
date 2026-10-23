@@ -236,6 +236,12 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <h2>Strategic resources</h2>
         <div id="strat"></div>
       </div>
+      <div class="group" id="synth" hidden>
+        <h2>Synthesized materials</h2>
+        <div id="advStock"></div>
+        <h2 style="margin-top:18px">Recipes known</h2>
+        <div id="recipes"></div>
+      </div>
       <div class="group">
         <h2>Orders this turn <span class="clock" id="clock" hidden></span></h2>
         <div class="two"><div class="panel"><h2 style="margin-bottom:8px">Your latest submission</h2><div id="receipt"></div></div>
@@ -438,6 +444,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   /* ---------- order basket ---------- */
   var BK = { sys: [], prices: [], reach: [], forces: [], draft: null, key: '' };
   var BK_STRAT = ['Adamant ore', 'Lattice crystals', 'Antimatter', 'Volatile isotopes', 'Living compounds', 'Void matter'];
+  var BK_ADV = [];   // advanced materials the nation holds, from its Stockpiles
   var BK_DESIG = ['Forge', 'Generator', 'Academy', 'Civic', 'Fortress', 'Trade Hub'];
   var BK_BRANCH = ['Military', 'Industry', 'Society', 'Logistics'];
   // Buildings in the rules that the price list does not carry.
@@ -570,6 +577,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         out.msg = 'Jump range ' + (kv('Jump range') || '?') + ' (' + (kv('Jump range with Volatile isotopes') || '?') + ' with Volatile isotopes).'; out.cls = 'ok';
         break;
       }
+      case 'USE': {
+        var uq = Math.max(1, Math.round(num(r.qty) || 1));
+        if (!r.what || !String(r.purpose || '').trim()) { bad('Choose a material and say how it is used.'); break; }
+        out.text = 'USE ' + uq + ' ' + r.what + ': ' + String(r.purpose).trim();
+        out.strat[r.what] = uq;
+        var heldN = num((STOCK[r.what] || {})['Stockpile']), usedN = others.reduce(function (a, x) { return a + (x.verb === 'USE' && x.what === r.what ? Math.max(1, Math.round(num(x.qty) || 1)) : 0); }, 0);
+        if (uq + usedN > heldN) bad('You hold ' + fmt(heldN) + ' ' + r.what + '; this basket uses ' + fmt(uq + usedN) + '.');
+        else note('Applied as the material\'s fixed effect when the turn is prepared.');
+        break;
+      }
       case 'STABILITY': {
         out.text = 'STABILITY'; out.cost.Influence = 5;
         if (others.some(function (x) { return x.verb === 'STABILITY'; })) bad('Stability may be bought once a turn.');
@@ -616,6 +633,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         f = '<select data-f="what">' + bkOpt(BK.forces.map(function (x) { return [x['Force ID'], (x['Name'] ? x['Name'] + ' ' : '') + x['Force ID'] + ' · at ' + (x['Location'] || '?')]; }), r.what, 'Force…') + '</select> to ' +
           '<input data-f="dest" placeholder="System ID, e.g. II-15" value="' + esc(r.dest || '') + '" style="width:150px">';
         break;
+      case 'USE':
+        f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +
+          '<select data-f="what">' + bkOpt(BK_ADV.map(function (k) { return [k, k + ' · ' + fmt(num((STOCK[k] || {})['Stockpile'])) + ' held']; }), r.what, 'Material…') + '</select> ' +
+          '<input data-f="purpose" placeholder="How, e.g. fit to the Cruisers built at II-07" value="' + esc(r.purpose || '') + '" style="min-width:260px">';
+        break;
       case 'STABILITY':
         f = '<span class="muted">One point of current Stability</span>';
         break;
@@ -636,7 +658,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#bkList').innerHTML = rows.length ? rows.map(function (r, i) { return bkRowHtml(r, i, evs[i]); }).join('') : '<div class="none">Your basket is empty. Add an order above.</div>';
     var tot = {};
     evs.forEach(function (e) { Object.keys(e.cost).forEach(function (k) { tot[k] = (tot[k] || 0) + e.cost[k]; }); Object.keys(e.strat).forEach(function (k) { tot[k] = (tot[k] || 0) + e.strat[k]; }); });
-    var keys = MAIN.concat(BK_STRAT).filter(function (k) { return tot[k]; });
+    var keys = MAIN.concat(BK_STRAT, BK_ADV).filter(function (k) { return tot[k]; });
     var bad = evs.filter(function (e) { return e.cls === 'bad'; }).length;
     $('#bkSum').innerHTML = (keys.length ? '<p class="note">This turn\'s earnings arrive before orders are paid, so a turn may spend more than the current stockpile.</p>' +
       '<div class="tbl"><table><thead><tr><th>Resource</th><th class="n">Current stockpile</th><th class="n">Used this turn</th><th class="n">Earnings this turn</th><th class="n">Projected stockpile</th></tr></thead><tbody>' +
@@ -672,7 +694,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#wTurn').hidden = false; $('#wTurn').textContent = 'Turn ' + turn;
     if (kv('Order form link')) $('#bkForm').href = kv('Order form link');
     $('#arcForm').href = kv('Archive form link') || ('https://docs.google.com/forms/d/e/1FAIpQLSc2HZpd_z0vQBFFxG4uGi0KzNIhUYftdKY_ErA9wl8ymmbl6Q/viewform?usp=pp_url&entry.1892272541=' + encodeURIComponent(kv('Nation') || ''));
-    $('#bkAdd').innerHTML = BK_VERBS.map(function (v) { return '<button type="button" data-add="' + v[0] + '">+ ' + esc(v[1]) + '</button>'; }).join('');
+    $('#bkAdd').innerHTML = BK_VERBS.concat(BK_ADV.length ? [['USE', 'Use a material']] : []).map(function (v) { return '<button type="button" data-add="' + v[0] + '">+ ' + esc(v[1]) + '</button>'; }).join('');
     drawBasket();
   }
 
@@ -863,6 +885,23 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       { k: 'Committed', t: 'Orders', n: 1, f: function (v) { return num(v) ? fmt(-num(v), true) : '—'; } },
       { k: 'Projected', n: 1, f: function (v, r) { return '<b>' + fmt(num(v)) + '</b>' + delta(num(v) - num(r['Stockpile'])); } }
     ]) : '<div class="none">No strategic resources held or worked yet.</div>';
+    var adv = rows.filter(function (r) { return r['Kind'] === 'Advanced' && ['Stockpile', 'Committed'].some(function (c) { return num(r[c]); }); });
+    BK_ADV = rows.filter(function (r) { return r['Kind'] === 'Advanced' && num(r['Stockpile']) > 0; }).map(function (r) { return r['Resource']; });
+    var rec = RECIPES || [];
+    if (!adv.length && !rec.length) { $('#synth').hidden = true; return; }
+    $('#synth').hidden = false;
+    $('#advStock').innerHTML = adv.length ? table(adv, [
+      { k: 'Resource', t: 'Material', f: function (v) { return '<b>' + esc(v) + '</b>'; } },
+      { k: 'Stockpile', t: 'Held', n: 1, f: function (v) { return fmt(num(v)); } },
+      { k: 'Committed', t: 'Orders', n: 1, f: function (v) { return num(v) ? fmt(-num(v), true) : '—'; } },
+      { k: 'Projected', n: 1, f: function (v, r) { return '<b>' + fmt(num(v)) + '</b>' + delta(num(v) - num(r['Stockpile'])); } }
+    ]) : '<div class="none">None made yet. A Synthesis Works turns a recipe\'s inputs into its material each turn.</div>';
+    $('#recipes').innerHTML = rec.length ? table(rec, [
+      { k: 'Recipe', f: function (v, r) { return '<b>' + esc(v) + '</b>' + (/exceptional/i.test(r['Variant'] || '') ? ' <span class="pill ok">Exceptional</span>' : ''); } },
+      { k: 'Inputs', f: function (v) { return esc(v); } },
+      { k: 'Effect', f: function (v) { return esc(v); } },
+      { k: 'Learned (turn)', t: 'Learned', n: 1 }
+    ]) : '';
   }
 
   function meter(v, max, opts) {
@@ -974,7 +1013,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 
   /* ---------- decision aids ---------- */
-  var STOCK = {};
+  var STOCK = {}, RECIPES = [];
   function stratParse(t) { var o = {}; String(t || '').split(/\s*[;,]\s*/).forEach(function (p) { var m = p.match(/^([\d.]+)\s+(.+)$/); if (m) o[m[2]] = (o[m[2]] || 0) + num(m[1]); }); return o; }
 
   function drawSince(hist) {
@@ -1155,8 +1194,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function load() {
     VIEW = null;
     Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
-      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events')])
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes')])
       .then(function (r) {
+        RECIPES = r[20] || [];
         S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
         STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
         drawHero(); drawStock(r[1]); drawOrders(r[2]); drawVitals(); drawWorks(r[3]);
