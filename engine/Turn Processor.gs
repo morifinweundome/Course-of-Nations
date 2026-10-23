@@ -57,7 +57,9 @@
  *      much again". The rules do not say whether these touch the Stability part of
  *      the cost. With COST_MULTIPLIERS_NEED_RULING = true such orders go to Rulings
  *      with a suggested price (multiplier on Influence only).
- *   8. Filling an empty civic slot has no cost in the rules: always a ruling.
+ *   8. Filling an empty civic slot has no cost in the rules: free, by the designer's precedent
+ *      (Turn 34). Replacing a civic costs 20 Influence and 1 Stability, and only a line that
+ *      clearly replaces (names the held civic with "replace", "for", "in place of") is priced so.
  *   9. Debt instalments are paid from Industry, Energy and Influence, largest first
  *      (the rules allow any resource; the sheet prices them all at 1 Mark).
  *  10. Population: settlement within a nation is automated (Settlement policy tab:
@@ -70,6 +72,22 @@
  *      buildings (Habitat Station) take no planetary slot.
  *  11. In a dry run, Calculations cannot recalculate, so the Stability step uses the
  *      targets as they stood at the start of the run.
+ *  14. Routine free-form lines the script settles itself (from Turn 35):
+ *      TREATY proposals, offers and declines to a nation in contact are delivered (Events
+ *      rows for both); acceptances, war, peace, alliances and vassalage stay rulings.
+ *      CONTACT <nation> is first contact (reach = jump range + 1 lanes). DISMANTLE refunds
+ *      25% of the Industry cost and frees the slot at once. POLICY / INITIATIVE Remediate
+ *      (or REMEDIATE <system> <points>), the Living compounds stipend and charters are
+ *      priced and applied; any other POLICY or INITIATIVE line stays a ruling.
+ *      Contact is read from the Turn log (First contact, Treaty, Trade), the Treaties,
+ *      Debts and Events tabs. A nation seen only in neighbouring space is a ruling.
+ *  15. Degradation lives in the Ledger (Nation = the system ID), as the World toll writes
+ *      it; remediation writes a negative Degradation line there.
+ *  16. Charter upkeep (3 Influence x systems held / 5 each) is charged from the Standing
+ *      effects tab and recalculated each turn from the systems held; capacity is raised in
+ *      Nations "Species Admin Capacity". The stipend's +1 is written to Nations
+ *      "Temporary Stability target". Both lapse (row made inactive, column lowered) in any
+ *      turn their upkeep cannot be paid. A missing column is skipped with a Turn log line.
  *
  * NOTHING HERE WRITES TO A FORMULA CELL. Each tab's writable columns are listed in
  * TURN_CONFIG.WRITABLE, by header text, following the README.
@@ -127,7 +145,9 @@ var TURN_CONFIG = {
     'Forces': ['Force ID', 'Owner', 'Name', 'Location', 'Escorts', 'Cruisers', 'Battleships', 'Dreadnoughts', 'Transports',
                'Ground Power', 'Static Defence', 'Note'],
     'Nations': ['Status', 'Government', 'Order–Liberty', 'Sacred–Secular', 'Martial–Pacific', 'Outward–Inward',
-                'Civic 1', 'Civic 2', 'Civic 3', 'Civic 4', 'Military tier', 'Industry tier', 'Society tier', 'Logistics tier'],
+                'Civic 1', 'Civic 2', 'Civic 3', 'Civic 4', 'Military tier', 'Industry tier', 'Society tier', 'Logistics tier',
+                'Temporary Stability target', 'Species Admin Capacity'],
+    'Events': ['Turn', 'Nations', 'Kind', 'Title', 'Text', 'Shown to player', 'Source'],
     'Turn log': '*', 'Rulings': '*', 'Run log': '*', 'Works in progress': '*', 'Control': '*', 'Preview': '*',
     'Standing effects': '*', 'Settlement policy': '*', 'Successions': '*', 'Exchange': '*', 'Exchange orders': '*'
   },
@@ -144,16 +164,29 @@ var TURN_CONFIG = {
   FISCAL_PCT_HEADERS: { Industry: 'Fiscal Industry %', Energy: 'Fiscal Energy %', Research: 'Fiscal Research %', Influence: 'Fiscal Influence %' },
 
   VERBS: ['DEVELOP', 'DESIGNATE', 'BUILD', 'SHIP', 'GROUND', 'DEFENCE', 'RESEARCH', 'COLONIZE', 'CONTACT', 'MOVE',
-          'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL'],
-  VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE' },
+          'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL',
+          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE'],
+  VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE', REMEDIATION: 'REMEDIATE' },
 
   // Rules: Development to level N costs 3 x N Industry.
   DEVELOPMENT_COST_PER_LEVEL: 3,
   // Rules: colonization needs Stability above Unrest (4 or more).
   UNREST_AT_OR_BELOW: 3,
   COLONY_SETTLERS_BN: 0.3,
+  // Rules: each colony after the first ordered in the same turn (expeditions included) costs 5 Influence more.
+  COLONY_SURCHARGE_INFLUENCE: 5,
   BASE_JUMP_RANGE: 3,
   STABILITY_PURCHASE_INFLUENCE: 5,
+  // Rules, Paying in Marks: +1 Stability = that turn's Influence price x 5 x 1.5; a second purchase within 3 turns costs double.
+  STABILITY_MARKS_FACTOR: 1.5,
+  DISMANTLE_REFUND: 0.25,
+  REMEDIATION_INDUSTRY_PER_POINT: 2,
+  REMEDIATION_MAX_POINTS: 10,
+  STIPEND: { resource: 'Living compounds', units: 2, reason: 'Living compounds stipend: +1 Stability target' },
+  CHARTER: { max: 2, society: 4, societyCollective: 3, influencePerSystem: 3, divisor: 5 },
+  // Nations columns written by the stipend and by charters (skipped with a Turn log line if missing).
+  TEMP_TARGET_COLUMN: 'Temporary Stability target',
+  ADMIN_CAPACITY_COLUMN: 'Species Admin Capacity',
   SHIFT_COST: { Influence: 15, Stability: 1 },
   CIVIC_REPLACE_COST: { Influence: 20, Stability: 1 },
   REFORM_COST: { Influence: 30, Stability: 2 },
@@ -436,6 +469,7 @@ function tpDoPrepare_(ss, opts) {
 function tpPrepareInModel_(model, turn) {
   var stats = { actions: 0, ready: 0, ruling: 0, rejected: 0, rulings: 0, errors: 0 };
   var world = new tpWorld_(model);
+  world.turnNo = turn;
   var deadline = tpCurrentDeadline_();
   var subs = tpPickSubmissions_(model, world, deadline);
   var A = model.tab('Actions');
@@ -692,6 +726,8 @@ function tpEvaluateOrder_(world, sim, o, earlier, phase) {
     o.dependsOn = c.row;
   }
   var ev = tpEvaluateBody_(world, sim, o.verb, sc.body, o, phase);
+  // An expedition (a ruling) still counts toward the colony surcharge of later colonies.
+  if (ev.expedition) sim.colonyCount++;
   if (depNote) ev.flag = ev.flag ? ev.flag + '; ' + depNote : depNote;
   if (o.dependsOn) ev.dependsOn = o.dependsOn;
   if (ev.status === 'Ready') {
@@ -751,7 +787,11 @@ function tpEvaluateBody_(world, sim, verb, body, o, phase) {
     case 'STABILITY': return tpEvStability_(world, sim, args);
     case 'BUY': case 'SELL': return tpEvExchange_(world, sim, verb, args);
     case 'CANCEL': return tpEvCancel_(world, sim, args);
-    case 'CONTACT': return tpEvContact_(world, sim, args);
+    case 'CONTACT': return tpEvContact_(world, sim, args, phase);
+    case 'TREATY': return tpEvTreaty_(world, sim, args);
+    case 'DISMANTLE': return tpEvDismantle_(world, sim, args);
+    case 'REMEDIATE': return tpEvRemediate_(world, sim, args);
+    case 'POLICY': case 'INITIATIVE': return tpEvPolicy_(world, sim, verb, args);
     case 'FATE': return tpRuling_('Fate of a conquered system', 'Fates follow a peace treaty and the GM\'s ruling on its terms', 'Apply the fate chosen per The Fate Of The Conquered.');
     case 'BURN': var e = tpRuling_('Burning archives', 'Only before a peace treaty cedes the system', 'If a cession is pending: -1 Stability, Absorb unavailable.'); e.stab = 1; e.spec = { type: 'STAB_ONLY' }; return e;
     case 'BREAK': var b = tpRuling_('Breaking a treaty', 'Breaking a treaty carries Stability, Infamy and casus belli effects the GM confirms',
@@ -1075,9 +1115,11 @@ function tpEvColonize_(world, sim, args) {
   if (/Necrophage/i.test(sim.traits)) return tpRuling_('Necrophage colony needs a Ruler', 'Every new Necrophage colony needs one Ruler', 'Check Rulers and charge one.');
   if (String(sys.get('Native era') || '').trim()) return tpRuling_('Natives present', 'A native world joins by a contact strategy, not colonization', 'Treat as CONTACT.');
   var reach = sim.tiers.Logistics >= 4 ? 2 : 1;
+  // Each colony after the first ordered this turn, expeditions included, costs 5 Influence more.
+  var nth = (sim.colonyCount || 0) + 1, extra = nth > 1 ? TURN_CONFIG.COLONY_SURCHARGE_INFLUENCE : 0;
   var d = world.distanceFromSet(Object.keys(sim.owned).filter(function (k) { return sim.ownsActive(k); }), sys.id, reach);
   if (d < 0) return tpRuling_('Beyond reach: an expedition', 'The target is more than ' + reach + ' lane(s) from the nation\'s systems',
-    'Expedition: pay the colony cost now; it travels at the jump range like a fleet.');
+    'Expedition: pay the colony cost now' + (extra ? ' (colony ' + nth + ' ordered this turn: +' + extra + ' Influence)' : '') + '; it travels at the jump range like a fleet.', { expedition: true });
   var env = sys.get('Environment');
   var col = env === 'Oceanic' ? 'Colony cost: Oceanic world' : env === 'Garden' ? 'Colony cost: Garden world' :
     (['Barren', 'Frozen', 'Arid', 'Volcanic', 'Toxic'].indexOf(env) >= 0 ? 'Colony cost: Barren, Frozen, Arid, Volcanic or Toxic world' : '');
@@ -1086,8 +1128,10 @@ function tpEvColonize_(world, sim, args) {
   var avail = sim.totalPopulation();
   if (avail < TURN_CONFIG.COLONY_SETTLERS_BN) return tpReject_('Not enough people to send ' + TURN_CONFIG.COLONY_SETTLERS_BN + ' bn settlers');
   return tpReady_(tpSysLabel_(sys) + ' (' + env + ')' + (desig ? ' as ' + desig : '') + '; ' + TURN_CONFIG.COLONY_SETTLERS_BN + ' bn settlers',
-    'Colony cost (' + env + '): ' + c + ' Influence and ' + c + ' Energy' + (desig ? '' : '; no designation given, so it produces nothing until designated'),
-    { Influence: c, Energy: c }, {}, { type: 'COLONIZE', sys: sys.id, name: (given && tpNorm_(given) !== tpNorm_(sys.id)) ? given : '', desig: desig });
+    'Colony cost (' + env + '): ' + c + ' Influence and ' + c + ' Energy' +
+    (extra ? '; colony ' + nth + ' ordered this turn: +' + extra + ' Influence (each colony after the first) = ' + (c + extra) + ' Influence' : '') +
+    (desig ? '' : '; no designation given, so it produces nothing until designated'),
+    { Influence: c + extra, Energy: c }, {}, { type: 'COLONIZE', sys: sys.id, name: (given && tpNorm_(given) !== tpNorm_(sys.id)) ? given : '', desig: desig });
 }
 
 // ---------- MOVE <force>[: <from>] > <to> ----------
@@ -1227,7 +1271,9 @@ function tpCivicAllowed_(civic, sim, axes, gov) {
 }
 
 // ---------- CIVIC replace <old> with <new> | CIVIC <new> [for|replacing <old>] ----------
-function tpEvCivic_(world, sim, args) {
+/** Reads a CIVIC line: the strict forms first, then (for prose such as "Adopt X as third civic ...")
+ *  the known civic names found in the line. Returns { nc, oc } or { error: <evaluation> }. */
+function tpParseCivic_(args, sim) {
   var names = Object.keys(TURN_CONFIG.CIVICS);
   var m = args.match(/^(?:replace\s+)?(.+?)\s+(?:with|by|->|→|>)\s+(.+)$/i);
   var oldC = '', newC = '';
@@ -1237,9 +1283,31 @@ function tpEvCivic_(world, sim, args) {
     if (m2) { newC = m2[1]; oldC = m2[2]; } else if (m) { oldC = m[1]; newC = m[2]; } else newC = args.replace(/^(?:adopt|add)\s+/i, '');
   }
   var nc = names.filter(function (x) { return tpNorm_(x) === tpNorm_(newC); })[0];
-  if (!nc) return tpRuling_('Civic not recognised: "' + newC + '"', 'Not a civic in the rules', 'Identify the civic.');
   var oc = oldC ? names.filter(function (x) { return tpNorm_(x) === tpNorm_(oldC); })[0] : '';
-  if (oldC && !oc) return tpRuling_('Civic not recognised: "' + oldC + '"', 'Not a civic in the rules', 'Identify the civic.');
+  if (nc && (!oldC || oc)) return { nc: nc, oc: oc || '' };
+  // Prose: find the civic names in the line, in the order written.
+  var t = ' ' + tpNorm_(args) + ' ';
+  var found = names.map(function (x) { var mm = t.match(new RegExp('[^a-z]' + tpEscapeRe_(tpNorm_(x)) + '(?=[^a-z])')); return mm ? { name: x, at: mm.index } : null; })
+    .filter(function (x) { return x; }).sort(function (a, b) { return a.at - b.at; }).map(function (x) { return x.name; });
+  if (!found.length) {
+    if (!nc) return { error: tpRuling_('Civic not recognised: "' + newC + '"', 'Not a civic in the rules', 'Identify the civic.') };
+    return { error: tpRuling_('Civic not recognised: "' + oldC + '"', 'Not a civic in the rules', 'Identify the civic.') };
+  }
+  var held = found.filter(function (x) { return sim.civics.indexOf(x) >= 0; });
+  var fresh = found.filter(function (x) { return sim.civics.indexOf(x) < 0; });
+  // A replacement only when the line clearly says so ("not a replacement" does not count).
+  var replaces = /\breplac(?:e|es|ing)\b|\bin place of\b|\binstead of\b/i.test(args) && !/\bnot\s+(?:a\s+)?replac/i.test(args);
+  if (!fresh.length) return { error: tpReject_('Already holds ' + held[0]) };
+  if (fresh.length > 1) return { error: tpRuling_('Several civics named: ' + fresh.join(', '), 'The line names more than one civic the nation does not hold', 'Identify the civic to adopt.') };
+  if (replaces && held.length > 1) return { error: tpRuling_('Civic to replace not clear: ' + held.join(', '), 'The line names more than one held civic', 'Identify the civic to replace.') };
+  if (replaces && !held.length) return { error: tpRuling_('Civic to replace not named', 'The line says replace but names no civic the nation holds', 'Identify the civic to replace.') };
+  return { nc: fresh[0], oc: replaces ? held[0] : '' };
+}
+
+function tpEvCivic_(world, sim, args) {
+  var parsed = tpParseCivic_(String(args || ''), sim);
+  if (parsed.error) return parsed.error;
+  var nc = parsed.nc, oc = parsed.oc;
   if (sim.civics.indexOf(nc) >= 0) return tpReject_('Already holds ' + nc);
   if (oc && sim.civics.indexOf(oc) < 0) return tpReject_('Does not hold ' + oc);
   var after = sim.civics.filter(function (c) { return c !== oc; }).concat([nc]);
@@ -1247,10 +1315,21 @@ function tpEvCivic_(world, sim, args) {
   if (allowed.ok === false) return tpReject_(nc + ' ' + allowed.why);
   var slots = 2 + (sim.tiers.Society >= 3 ? 1 : 0) + (sim.tiers.Society >= 5 ? 1 : 0);
   if (!oc) {
-    if (sim.civics.length >= slots) return tpReject_('All ' + slots + ' civic slots are full; name the civic to replace');
-    var col0 = TURN_CONFIG.CIVIC_COLUMNS[sim.civics.length];
-    return tpRuling_('Filling an empty civic slot', 'The rules give no cost for adopting a civic in a free slot', 'Free, or the replacement price (20 Influence, 1 Stability).',
-      { details: 'Adopt ' + nc + ' in ' + col0, spec: { type: 'CIVIC', col: col0, value: nc, old: '' }, cost: {}, strat: {}, stab: 0 });
+    // Filling an empty slot is free (designer's precedent, Turn 34). The third slot opens at Society Tier 3, the fourth at Tier 5.
+    var ord = String(args).match(/\b(third|3rd|fourth|4th)\b/i), col0;
+    if (ord) {
+      var k = /^(?:third|3rd)$/i.test(ord[1]) ? 3 : 4, word = k === 3 ? 'third' : 'fourth';
+      if (k > slots) return tpReject_('The ' + word + ' civic slot opens at Society Tier ' + (k === 3 ? 3 : 5) + ' (Society Tier ' + sim.tiers.Society + ' now; a tier researched this turn arrives at the end of the turn)');
+      col0 = TURN_CONFIG.CIVIC_COLUMNS[k - 1];
+      if (sim.civicCols[col0]) return tpReject_('The ' + word + ' civic slot already holds ' + sim.civicCols[col0] + '; write CIVIC replace ' + sim.civicCols[col0] + ' with ' + nc);
+    } else {
+      col0 = TURN_CONFIG.CIVIC_COLUMNS.slice(0, slots).filter(function (c) { return !sim.civicCols[c]; })[0];
+      if (!col0) return tpReject_('All ' + slots + ' civic slots are full; name the civic to replace');
+    }
+    var ev0 = tpReady_('Adopt ' + nc + ' in ' + col0, 'Empty civic slot (' + slots + ' open at Society Tier ' + sim.tiers.Society + '): free, by the designer\'s precedent; requirement met',
+      {}, {}, { type: 'CIVIC', col: col0, value: nc, old: '' });
+    if (allowed.ok === 'ask') return Object.assign(ev0, { status: 'Needs ruling', flag: nc + ': ' + allowed.why, why: 'Cybernetic biology may or may not be 50% organic', suggest: 'Rule on the species; the slot itself is free.' });
+    return ev0;
   }
   var col = TURN_CONFIG.CIVIC_COLUMNS.filter(function (c) { return sim.civicCols[c] === oc; })[0];
   var inf = TURN_CONFIG.CIVIC_REPLACE_COST.Influence, stab = TURN_CONFIG.CIVIC_REPLACE_COST.Stability, mults = [];
@@ -1316,19 +1395,49 @@ function tpEvTransfer_(world, sim, args) {
 }
 
 // ---------- STABILITY ----------
+// Also reads prose: "+1 (pay 5 Influence)", "Buy +1 for 5 Influence (only if ...)", "+1 (pay in Stellar Marks ...)".
 function tpEvStability_(world, sim, args) {
-  if (args && !/^\+?1?\s*$/.test(args)) return tpRuling_('Only one point of Stability may be bought a turn', 'Unreadable amount', 'Treat as one point.');
-  if (sim.gov === 'Collective') return tpReject_('A Collective cannot buy Stability with Influence');
+  var text = String(args || ''), bare = text.replace(/\([^)]*\)/g, ' ');
+  // The amount is the first number that is not a price ("5 Influence", "7.5 Marks").
+  var amount = null;
+  bare.replace(/([+\-−]?)\s*(\d+(?:\.\d+)?)\s*([A-Za-z]*)/g, function (all, sg, num, word) {
+    if (amount === null && !/^(?:influence|stellar|marks?|sm|industry|energy|research|turns?)$/i.test(word)) amount = (sg === '-' || sg === '−' ? -1 : 1) * Number(num);
+    return all;
+  });
+  if (amount === null) amount = 1;
+  if (amount !== 1) return tpRuling_('Only one point of Stability may be bought a turn', 'Unreadable amount', 'Treat as one point.');
+  var inMarks = /\b(?:in|with|using)\s+(?:stellar\s+)?marks\b/i.test(text) || (/\bmarks\b/i.test(text) && !/influence/i.test(text));
+  if (sim.gov === 'Collective') return tpReject_('A Collective cannot buy Stability' + (inMarks ? ', in Marks or Influence' : ' with Influence'));
   if (sim.stabBought) return tpReject_('Stability may be bought once a turn');
-  var target = tpNum_(sim.calc['Stability target']);
-  if (sim.stability + 1 > target) return tpReject_('Bought Stability never raises it above its target (' + sim.stability + ' of ' + target + ')');
-  var ev = tpReady_('+1 Stability (' + sim.stability + ' to ' + (sim.stability + 1) + ', target ' + target + ')', '5 Influence', { Influence: TURN_CONFIG.STABILITY_PURCHASE_INFLUENCE }, {}, { type: 'STABILITY' });
+  var target = tpNum_(sim.calc['Stability target']) + (sim.targetBonus || 0);
+  var tnote = sim.targetBonus ? ' (includes +' + sim.targetBonus + ' ordered this turn)' : '';
+  if (sim.stability + 1 > target) return tpReject_('Bought Stability never raises it above its target (' + sim.stability + ' of ' + target + tnote + ')');
+  var cond = (text.match(/\bonly if\b[^);]*/i) || [])[0];
+  var condNote = cond ? '; "' + cond.trim() + '" is the rule\'s own limit, checked against the target as it stands' : '';
+  var details = '+1 Stability (' + sim.stability + ' to ' + (sim.stability + 1) + ', target ' + target + tnote + ')';
+  var ev;
+  if (inMarks) {
+    var x = world.exchangeState().Influence, mult = TURN_CONFIG.STABILITY_PURCHASE_INFLUENCE * TURN_CONFIG.STABILITY_MARKS_FACTOR;
+    var recent = world.recentMarksStability(sim.nid);
+    var marks = tpRound2_(x.price * mult * (recent ? 2 : 1));
+    var strat = {}; strat[TURN_CONFIG.MARKS] = marks;
+    ev = tpReady_(details, 'Paid in Marks: Influence price ' + tpRound2_(x.price) + ' x 5 x 1.5' + (recent ? ' x 2 (second purchase in Marks within 3 turns: Turn ' + recent + ')' : '') + ' = ' + marks + ' Marks' + condNote,
+      {}, strat, { type: 'STABILITY' });
+    ev.stabWorking = 'Bought with ' + marks + ' Marks';
+  } else {
+    ev = tpReady_(details, '5 Influence' + condNote, { Influence: TURN_CONFIG.STABILITY_PURCHASE_INFLUENCE }, {}, { type: 'STABILITY' });
+  }
   ev.stab = -1;
   return ev;
 }
 
-// ---------- CONTACT <strategy> @ <system> ----------
-function tpEvContact_(world, sim, args) {
+// ---------- CONTACT <strategy> @ <system>  |  CONTACT <nation> ----------
+function tpEvContact_(world, sim, args, phase) {
+  if (!/@/.test(args)) {
+    var nt = String(args).replace(/^\s*:?\s*(?:with\s+)?/i, '').replace(/\s*\([^)]*\)\s*$/, '').replace(/[.;,]+\s*$/, '').trim();
+    var tn = world.nationByName(nt);
+    if (tn) return tpEvContactNation_(world, sim, tn, phase);
+  }
   var strategies = Object.keys(TURN_CONFIG.CONTACT_COSTS).concat(['Uplift', 'Integrate', 'Ascension']);
   var strat = strategies.filter(function (s) { return tpNorm_(args).indexOf(tpNorm_(s)) >= 0; })[0];
   var p = tpSplitAt_(args);
@@ -1343,6 +1452,198 @@ function tpEvContact_(world, sim, args) {
   if (strat === 'Integrate') note = 'A ground battle';
   return tpRuling_('Contact: ' + (strat || 'strategy not named'), 'Contact strategies are rolled by the GM', (Object.keys(cost).length ? 'Cost ' + tpCostText_(cost) + ' (charged on Approve); ' : '') + note + '.',
     { details: (strat || '?') + (sys ? ' at ' + tpSysLabel_(sys) : ''), cost: cost, strat: {}, stab: 0, spec: { type: 'CHARGE_ONLY' } });
+}
+
+// ---------- CONTACT <nation>: first contact (rules, First Contact) ----------
+// Free; the other nation must hold a system within the initiator's jump range + 1 lanes.
+function tpEvContactNation_(world, sim, tn, phase) {
+  if (tn.id === sim.nid) return tpReject_('A nation cannot contact itself');
+  if (tn.status === 'Eliminated') return tpReject_(tn.name + ' is eliminated');
+  if (sim.contacted[tn.id]) return tpReject_('Contact with ' + tn.name + ' is already ordered this turn');
+  var rec = world.contactWith(sim.nid, tn.id), already = false;
+  if (rec) {
+    // At Resolve, the other nation may have made the same contact earlier this turn.
+    if (phase === 'resolve' && rec.made && rec.turn === world.turnNo) already = true;
+    else return tpReject_('Already in contact with ' + tn.name + ' (' + rec.how + ')');
+  }
+  var range = TURN_CONFIG.BASE_JUMP_RANGE + Math.max(0, sim.tiers.Logistics - 1), reach = range + 1;
+  var mine = Object.keys(sim.owned).filter(function (k) { return sim.ownsActive(k); });
+  if (!mine.length) return tpReject_('Holds no system to reach from');
+  var dist = world.lanesFrom(mine), best = null;
+  world.systems.forEach(function (s) {
+    if (String(s.get('Owner') || '') !== tn.id) return;
+    var d = dist[s.id];
+    if (d !== undefined && (!best || d < best.d)) best = { d: d, sys: s.id };
+  });
+  if (!best) return tpReject_('Out of reach: no lane route to any system ' + tn.name + ' holds');
+  if (best.d > reach) return tpReject_('Out of reach: ' + tn.name + '\'s nearest system, ' + world.label(best.sys) + ', is ' + best.d + ' lanes away; reach is ' + reach + ' (jump range ' + range + ' + 1)');
+  var back = world.lanesFrom([best.sys]);
+  var near = mine.filter(function (k) { return back[k] === best.d; })[0];
+  return tpReady_('First contact with ' + tn.name + (already ? ' (already made this turn from the other side)' : ''),
+    tn.name + ' holds ' + world.label(best.sys) + ', ' + best.d + ' lane' + (best.d === 1 ? '' : 's') + (near ? ' from ' + world.label(near) : '') +
+    '; reach ' + reach + ' (jump range ' + range + ' + 1). Free; contact is made this turn and diplomacy may begin next turn',
+    {}, {}, { type: 'FIRST_CONTACT', target: tn.id, already: already, dist: best.d });
+}
+
+// ---------- TREATY <nation>: ... | TREATY Propose to <nation>: ... | TREATY Decline ... ----------
+// Proposals, offers and declines are delivered and answered next turn. Acceptances (which make a
+// treaty) and anything about war, peace, alliances or vassalage stay with the GM.
+function tpEvTreaty_(world, sim, args) {
+  var text = String(args || '').replace(/^\s*[:\-–—]\s*/, '').trim();
+  var me = world.nation(sim.nid) || { name: sim.nid };
+  var to = null, m, body = text;
+  m = text.match(/^(?:propos(?:e|al|ed)|offers?|offered)\s+(?:to\s+)?(.+?)\s*(?::|\s[-–—]\s|,)\s*(.*)$/i);
+  if (m) { to = world.nationByName(m[1]); if (to) body = m[2]; }
+  if (!to) { m = text.match(/^(?:to\s+|with\s+)?(.+?)\s*:\s*(.*)$/i); if (m) { to = world.nationByName(m[1]); if (to) body = m[2]; } }
+  if (to && to.id === sim.nid) { to = null; body = text; }
+  if (!to) {
+    var others = world.nationMentions(text).filter(function (id) { return id !== sim.nid; });
+    if (others.length > 1) return tpRuling_('Treaty with several nations: ' + others.join(', '), 'The line names more than one other nation and no single recipient',
+      'Identify the recipient (write TREATY <nation>: ...).', { details: text });
+    if (others.length === 1) to = world.nation(others[0]);
+  }
+  if (!to) return tpRuling_('Treaty recipient not found', 'No other nation is named (write TREATY <nation>: ...)', 'Identify the recipient.', { details: text });
+  var details = (/^\s*(?:decline|reject|refuse)s?\b/i.test(text) ? 'Reply to ' : 'Proposal to ') + to.name + ': ' + body;
+  if (/\bwars?\b|\bpeace\b|cease-?fire|armistice|surrender|capitulat|\balliances?\b|\ballied\b|\bally\b|defensive pact|mutual defen[cs]e|\bvassal|tributar|suzerain|protectorate|\bannex/i.test(text)) {
+    return tpRuling_('Treaty touching war, peace, alliance or vassalage', 'These carry consequences the GM rules', 'Deliver it and rule the terms; record any treaty on the Treaties tab.', { details: details });
+  }
+  var decline = /^\s*(?:decline|reject|refuse)s?\b/i.test(text);
+  if (!decline && (/^\s*(?:we\s+)?(?:accept|agree|ratif|sign|confirm)/i.test(text) || /\baccept(?:s|ed|ing)?\b|\bratif(?:y|ies|ied)\b/i.test(text))) {
+    return tpRuling_('Treaty acceptance', 'Accepting makes a treaty, with terms and effects the GM confirms', 'If the other side\'s offer stands: record the treaty on the Treaties tab.', { details: details });
+  }
+  // Contact: no action of any kind may be aimed at a nation before first contact.
+  if (sim.contacted[to.id]) return tpReject_('No contact with ' + to.name + ' yet: CONTACT is ordered this turn, and diplomacy may begin the turn after');
+  var rec = world.contactWith(sim.nid, to.id);
+  if (!rec) {
+    var nb = world.neighbouring(sim.nid, to.id);
+    if (nb) return tpRuling_('No contact with ' + to.name + ' on record', 'Neither nation has made first contact, though ' + nb,
+      'Approve to deliver it (and count the two as in contact); otherwise reject: No contact with ' + to.name + '.',
+      { details: details, cost: {}, strat: {}, stab: 0, spec: { type: 'TREATY', to: to.id, mode: decline ? 'reply' : 'proposal', text: body } });
+    return tpReject_('No contact with ' + to.name);
+  }
+  var mode = decline ? 'reply' : 'proposal';
+  return tpReady_(details, (decline ? 'Reply delivered to ' : 'Proposal delivered to ') + to.name + '; answered next turn (in contact: ' + rec.how + ')',
+    {}, {}, { type: 'TREATY', to: to.id, mode: mode, text: body });
+}
+
+// ---------- DISMANTLE <building> @ <system> ----------
+// Rules: removes a building at once, refunds 25% of its Industry cost and frees its slot the same turn.
+function tpEvDismantle_(world, sim, args) {
+  var p = tpSplitAt_(args);
+  if (!p) return tpRuling_('No system given (write DISMANTLE <building> @ <system>)', 'The system is missing', 'Identify the system.');
+  var name = p.what.replace(/^(?:an?|the|one)\s+/i, '').trim();
+  var sys = world.findSystem(p.where);
+  if (!sys) return tpRuling_('System not found: "' + p.where + '"', 'The script cannot find this system', 'Identify the system.');
+  if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
+  var standing = String(sys.get('Buildings') || '').split(/\s*,\s*/).filter(function (x) { return x; });
+  (sim.dismantled[sys.id] || []).forEach(function (d) { var i = standing.indexOf(d); if (i >= 0) standing.splice(i, 1); });
+  var key = tpNorm_(name), base0 = function (x) { return tpNorm_(String(x).replace(/\s*\(.*\)\s*$/, '')); };
+  var hit = standing.filter(function (x) { return tpNorm_(x) === key; })[0] ||
+            standing.filter(function (x) { return base0(x) === key || base0(x) === key.replace(/s$/, ''); })[0];
+  if (!hit) {
+    if (sim.buildingsOf(sys.id).some(function (x) { return tpNorm_(x) === key || base0(x) === key; })) return tpReject_(name + ' is not yet complete in ' + tpSysLabel_(sys) + '; only a standing building can be dismantled');
+    return tpReject_('No ' + name + ' stands in ' + tpSysLabel_(sys) + (standing.length ? ' (it holds ' + standing.join(', ') + ')' : ''));
+  }
+  var base = hit.replace(/\s*\(.*\)\s*$/, '');
+  var def = world.unlockedBuilding(sim.nid, hit);
+  if (def && def.error) def = null;
+  if (!def) { var sig = tpFindKey_(TURN_CONFIG.SIGNATURE_WORKS, base); if (sig) def = { name: sig, industry: TURN_CONFIG.SIGNATURE_WORKS[sig].industry, slot: true }; }
+  if (!def) def = world.building(base);
+  if (!def) return tpRuling_('Building cost unknown: ' + hit, 'Not in Tables, the rules or Unlocks, so the 25% refund cannot be priced', 'Remove it and refund 25% of its Industry cost.',
+    { details: hit + ' at ' + tpSysLabel_(sys) });
+  var industry = def.industry;
+  if (tpNorm_(base) === 'extractor') { var ex = sim.calc['Extractor cost (Industry)']; if (ex !== '' && ex !== undefined && ex !== null) industry = tpNum_(ex); }
+  var refund = tpRound1_(industry * TURN_CONFIG.DISMANTLE_REFUND);
+  var orbital = !!def.orbital || tpIsOrbital_(world, hit);
+  var slot = def.slot !== false && !orbital;
+  return tpReady_(hit + ' at ' + tpSysLabel_(sys) + ' dismantled',
+    'Refund 25% of ' + industry + ' Industry = ' + refund + ' Industry (strategic resources are not refunded); ' + (slot ? 'frees its building slot this turn' : orbital ? 'frees its orbital slot this turn' : 'takes no slot'),
+    refund ? { Industry: -refund } : {}, {}, { type: 'DISMANTLE', sys: sys.id, building: hit, slot: slot, refund: refund });
+}
+
+// ---------- REMEDIATE <system> <points>  |  POLICY / INITIATIVE Remediate <system>: remove N Degradation ... ----------
+// Rules: 2 Industry for each point of Degradation removed from a system, up to 10 points a turn.
+// Paying in Marks: that turn's Exchange selling price of the Industry it costs.
+function tpEvRemediate_(world, sim, args) {
+  var t = String(args || '').replace(/^\s*:?\s*remediat\w*\s*/i, '').trim();
+  var sysText = t, rest = '', m = t.match(/^(.*?)\s*:\s*(.*)$/);
+  if (m) { sysText = m[1]; rest = m[2]; }
+  else { var m2 = t.match(/^(.*?)\s+(?:by\s+|remove\s+)?(\d+(?:\.\d+)?)\b(.*)$/i); if (m2) { sysText = m2[1]; rest = m2[2] + m2[3]; } }
+  var sys = world.findSystem(sysText) || world.findSystem(String(sysText).split(/\s+/)[0]);
+  if (!sys) return tpRuling_('System not found: "' + sysText + '"', 'The script cannot find this system', 'Identify the system.');
+  if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
+  var pm = rest.match(/(\d+(?:\.\d+)?)\s*(?:points?\s*(?:of\s+)?)?degradation/i) || rest.match(/^\s*(?:remove\s+)?(\d+(?:\.\d+)?)\s*(?:points?|pts?)?\s*(?:$|[,;(])/i);
+  if (!pm) return tpRuling_('Points of Degradation not given', 'Write REMEDIATE <system> <points>', 'Identify how many points to remove.');
+  var asked = Number(pm[1]), notes = [];
+  var done = sim.remediated[sys.id] || 0, room = TURN_CONFIG.REMEDIATION_MAX_POINTS - done;
+  if (asked <= 0) return tpReject_('Nothing to remove');
+  if (room <= 0) return tpReject_('Already ' + TURN_CONFIG.REMEDIATION_MAX_POINTS + ' points of remediation in ' + tpSysLabel_(sys) + ' this turn');
+  var pts = Math.min(asked, room);
+  if (pts < asked) notes.push('at most ' + TURN_CONFIG.REMEDIATION_MAX_POINTS + ' points a turn: ' + pts + ' of ' + asked);
+  if (world.systemsTab.c('Degradation') >= 0) {
+    var cur = tpRound2_(tpNum_(sys.get('Degradation')) - done);
+    if (cur <= 0) return tpReject_(tpSysLabel_(sys) + ' has no Degradation to remove');
+    if (pts > cur) { pts = cur; notes.push('it holds only ' + cur + ' Degradation'); }
+    notes.push('Degradation ' + cur + ' -> ' + tpRound2_(cur - pts));
+  }
+  pts = tpRound2_(pts);
+  var industry = tpRound2_(TURN_CONFIG.REMEDIATION_INDUSTRY_PER_POINT * pts);
+  var spec = { type: 'REMEDIATE', sys: sys.id, points: pts };
+  var details = tpSysLabel_(sys) + ': remove ' + pts + ' Degradation';
+  if (/\bmarks\b/i.test(t)) {
+    var x = world.exchangeState().Industry, sell = x.price * (1 + TURN_CONFIG.EXCHANGE.spread);
+    var marks = tpRound2_(industry * sell), strat = {};
+    strat[TURN_CONFIG.MARKS] = marks;
+    return tpReady_(details + ', paid in Marks', pts + ' x 2 = ' + industry + ' Industry at the Exchange selling price ' + tpRound2_(sell) + ' = ' + marks + ' Marks' + (notes.length ? '; ' + notes.join('; ') : ''),
+      {}, strat, spec);
+  }
+  return tpReady_(details, pts + ' x 2 = ' + industry + ' Industry' + (notes.length ? '; ' + notes.join('; ') : ''), { Industry: industry }, {}, spec);
+}
+
+// ---------- POLICY / INITIATIVE ----------
+// Remediation, the Living compounds stipend and charters are settled here; any other line is the GM's.
+function tpEvPolicy_(world, sim, verb, args) {
+  var t = String(args || '').replace(/^\s*:\s*/, '').trim();
+  if (/^remediat/i.test(t)) return tpEvRemediate_(world, sim, t);
+  if (/living compounds/i.test(t) && /stability/i.test(t)) return tpEvStipend_(world, sim, t);
+  if (/\bcharters?\b/i.test(t.replace(/\b(?:constitutional|federal|founding)\s+charters?\b/ig, ''))) return tpEvCharters_(world, sim, t);
+  return tpRuling_('Free-form order (' + verb + ')', verb + ' lines other than remediation, the Living compounds stipend and charters are ruled by the GM',
+    'Rule as written, or treat as not an order.');
+}
+
+// Rules: 2 Living compounds a turn sustain +1 Stability target, at most +1 however many are paid;
+// the bonus lapses when payment stops.
+function tpEvStipend_(world, sim, t) {
+  var S = TURN_CONFIG.STIPEND;
+  if (/\b(?:stop|end|cancel|cease|halt)\b/i.test(t)) return tpRuling_('Ending the Living compounds stipend', 'Stopping the stipend ends its +1 Stability target', 'Set the Standing effects row inactive and lower Temporary Stability target by 1.');
+  if (sim.stipend) return tpReject_('A Living compounds stipend is already ordered this turn; at most +1 Stability target');
+  if (world.standingRows(sim.nid, function (r) { return r.res === S.resource && r.amt < 0 && /stipend|stability target/i.test(r.reason); }).length)
+    return tpReject_('A Living compounds stipend is already in force (Standing effects); at most +1 Stability target however many are paid');
+  var strat = {}; strat[S.resource] = S.units;
+  return tpReady_('Living compounds stipend: ' + S.units + ' a turn for +1 Stability target',
+    S.units + ' Living compounds this turn, then ' + S.units + ' a turn from the Standing effects tab; +1 Stability target while paid (at most +1; Nations ' +
+    TURN_CONFIG.TEMP_TARGET_COLUMN + '); lapses in any turn it is not paid', {}, strat, { type: 'STIPEND' });
+}
+
+// Rules: from Society Tier 4 (a Collective from Tier 3) up to two charters, each +1 Administrative
+// Capacity, upkeep 3 Influence x systems held / 5 each a turn, lapsing in any turn it is not paid.
+function tpEvCharters_(world, sim, t) {
+  var C = TURN_CONFIG.CHARTER;
+  if (/\b(?:drop|end|cancel|give up|relinquish|abandon)\b/i.test(t)) return tpRuling_('Giving up a charter', 'Ending a charter lowers Administrative Capacity', 'Set the charter row on Standing effects inactive and lower ' + TURN_CONFIG.ADMIN_CAPACITY_COLUMN + ' by 1.');
+  var want = /\b(?:two|2|both)\b/i.test(t) ? 2 : 1;
+  var collective = sim.gov === 'Collective', need = collective ? C.societyCollective : C.society;
+  if (sim.tiers.Society < need) return tpRuling_('Charters need Society Tier ' + need + (collective ? ' (Collective)' : '') + '; Society Tier ' + sim.tiers.Society + ' now',
+    'The tier is not reached as the orders are read (a tier researched this turn arrives at the end of the turn)', 'Carry the order to the next turn, or reject it.', { details: t });
+  var held = world.standingRows(sim.nid, function (r) { return /^charter\b/i.test(r.reason); }).length + (sim.charters || 0);
+  if (held >= C.max) return tpReject_('Already holds ' + held + ' charters; at most ' + C.max);
+  var take = Math.min(want, C.max - held);
+  var systems = Object.keys(sim.owned).length;
+  var each = tpRound1_(C.influencePerSystem * systems / C.divisor);
+  return tpReady_(take + ' charter' + (take > 1 ? 's' : '') + ': +' + take + ' Administrative Capacity',
+    'Each charter +1 Administrative Capacity (Nations ' + TURN_CONFIG.ADMIN_CAPACITY_COLUMN + ' +1 each); upkeep 3 Influence x ' + systems + ' systems held / 5 = ' + each +
+    ' Influence a turn each, first paid now, then with upkeep from the Standing effects tab (recalculated each turn by systems held)' +
+    (take < want ? '; only ' + take + ' more allowed (holds ' + held + ')' : '') + (collective ? '; a Collective may take charters from Society Tier 3' : '') + '; a charter lapses in any turn its upkeep is not paid',
+    { Influence: tpRound1_(each * take) }, {}, { type: 'CHARTER', n: take, each: each, systems: systems });
 }
 
 // ---------- BUY / SELL <qty> <resource> [AT <price> OR LESS|MORE] [OVER <n> TURNS] [FOR <n> TURNS] ----------
@@ -1423,7 +1724,15 @@ function tpCommitSim_(sim, ev) {
     case 'GROUND': sim.armyCapAdded += ev.armyAdd || 0; break;
     case 'DEFENCE': sim.staticAdded[sp.sys] = (sim.staticAdded[sp.sys] || 0) + (sp.points || 0); break;
     case 'RESEARCH': sim.researched[sp.branch] = sp.tier; break;
-    case 'COLONIZE': sim.owned[sp.sys] = true; sim.colonized[sp.sys] = true; sim.taken[sp.sys] = true; sim.settlersOut += TURN_CONFIG.COLONY_SETTLERS_BN; if (sp.desig) sim.desigNow[sp.sys] = sp.desig; break;
+    case 'COLONIZE': sim.owned[sp.sys] = true; sim.colonized[sp.sys] = true; sim.taken[sp.sys] = true; sim.settlersOut += TURN_CONFIG.COLONY_SETTLERS_BN; if (sp.desig) sim.desigNow[sp.sys] = sp.desig; sim.colonyCount++; break;
+    case 'DISMANTLE':
+      (sim.dismantled[sp.sys] = sim.dismantled[sp.sys] || []).push(sp.building);
+      if (sp.slot) sim.slotsAdded[sp.sys] = (sim.slotsAdded[sp.sys] || 0) - 1;
+      break;
+    case 'REMEDIATE': sim.remediated[sp.sys] = tpRound2_((sim.remediated[sp.sys] || 0) + sp.points); break;
+    case 'FIRST_CONTACT': sim.contacted[sp.target] = true; break;
+    case 'STIPEND': sim.stipend = true; sim.targetBonus = (sim.targetBonus || 0) + 1; break;
+    case 'CHARTER': sim.charters = (sim.charters || 0) + sp.n; break;
     case 'MOVE': sim.moved[ev.moveRow] = true; break;
     case 'SHIFT': sim.shifted = true; sim.axes[sp.col] = sp.value; break;
     case 'CIVIC': sim.civicCols[sp.col] = sp.value; sim.civics = TURN_CONFIG.CIVIC_COLUMNS.map(function (k) { return sim.civicCols[k]; }).filter(function (x) { return x; }); break;
@@ -1502,6 +1811,7 @@ function tpPreparedInRunLog_(model, turn) {
 function tpResolver_(model, turn, stats) {
   this.model = model; this.turn = turn; this.stats = stats;
   this.world = new tpWorld_(model);
+  this.world.turnNo = turn;
   this.L = model.tab('Ledger'); this.A = model.tab('Actions'); this.R = model.tab('Rulings'); this.TL = model.tab('Turn log');
   this.completions = [];
 }
@@ -1592,7 +1902,11 @@ tpResolver_.prototype.readActions = function () {
 tpResolver_.prototype.costFromRow = function (r) {
   var A = this.A, cost = {};
   TURN_CONFIG.RESOURCES.forEach(function (res) { var v = A.get(r, res); if (v !== '' && tpNum_(v)) cost[res] = tpNum_(v); });
-  return { cost: cost, strat: tpParseStrat_(A.get(r, 'Strategic')) };
+  var strat = tpParseStrat_(A.get(r, 'Strategic'));
+  // A price in Marks (Stability or remediation paid in Marks) travels in the Strategic column.
+  var mk = String(A.get(r, 'Strategic') || '').match(/(\d+(?:\.\d+)?)\s+Stellar Marks/i);
+  if (mk && Number(mk[1])) strat[TURN_CONFIG.MARKS] = Number(mk[1]);
+  return { cost: cost, strat: strat };
 };
 
 tpResolver_.prototype.setStatus = function (a, status, flagAdd) {
@@ -1664,6 +1978,23 @@ tpResolver_.prototype.phaseDiplomacy = function () {
       lines.push(self.ledger('Diplomacy', ev.spec.to, r, items[r], 'Transfer from ' + a.nation, a.text, a.actionNo));
     });
     self.A.set(a.row, 'Ledger lines', lines.join(', '));
+    self.setStatus(a, 'Applied'); a.spec = ev.spec;
+    self.settleRuling(self.decisions['A' + a.actionNo]);
+    self.stats.applied++;
+  });
+  // TREATY lines: proposals, offers and declines are delivered (Events rows for both parties).
+  this.actions.filter(function (a) { return a.verb === 'TREATY'; }).forEach(function (a) {
+    if (self.gate(a) !== 'go') return;
+    var approved = a.status === 'Needs ruling';
+    var ev = self.reevaluate(a);
+    if (ev.status === 'Condition failed') { self.setStatus(a, 'Condition failed', ev.flag); return; }
+    if (ev.status === 'Rejected' || ev.status === 'Duplicate') { self.setStatus(a, 'Failed', ev.flag); return; }
+    if (!ev.spec || (ev.status !== 'Ready' && !(approved && ev.status === 'Needs ruling'))) {
+      if (approved) { self.setStatus(a, 'Settled by GM', 'Approved; nothing the script can apply'); self.settleRuling(self.decisions['A' + a.actionNo]); }
+      else self.setStatus(a, 'Not applied', ev.flag);
+      return;
+    }
+    self.treatyNotice(a, ev.spec);
     self.setStatus(a, 'Applied'); a.spec = ev.spec;
     self.settleRuling(self.decisions['A' + a.actionNo]);
     self.stats.applied++;
@@ -1804,7 +2135,7 @@ tpResolver_.prototype.payDebts = function (n) {
 tpResolver_.prototype.phaseSpending = function () {
   var self = this;
   this.actions.forEach(function (a) {
-    if (a.verb === 'TRANSFER' || a.verb === 'MOVE' || a.verb === 'BUY' || a.verb === 'SELL' || a.verb === 'CANCEL') return;
+    if (a.verb === 'TRANSFER' || a.verb === 'MOVE' || a.verb === 'BUY' || a.verb === 'SELL' || a.verb === 'CANCEL' || a.verb === 'TREATY') return;
     if (a.verb === 'COVERT') {
       var d = self.decisions['A' + a.actionNo];
       if (d && d.kind !== 'open') { self.A.set(a.row, 'GM ruling', d.decision || 'Settled'); self.setStatus(a, 'Settled by GM'); self.settleRuling(d); }
@@ -1826,8 +2157,9 @@ tpResolver_.prototype.phaseSpending = function () {
     var reason = a.verb + ' ' + (ev.details || '');
     Object.keys(ev.cost || {}).forEach(function (r) { if (ev.cost[r]) lines.push(self.ledger('Spending', a.nation, r, -ev.cost[r], reason, ev.elab || '', a.actionNo)); });
     Object.keys(ev.strat || {}).forEach(function (r) { if (ev.strat[r]) lines.push(self.ledger('Spending', a.nation, r, -ev.strat[r], reason, ev.elab || '', a.actionNo)); });
-    if (ev.stab) lines.push(self.ledger('Spending', a.nation, 'Stability', -ev.stab, reason, ev.stab > 0 ? 'Stability cost' : 'Bought with 5 Influence', a.actionNo));
-    self.apply(a, ev.spec);
+    if (ev.stab) lines.push(self.ledger('Spending', a.nation, 'Stability', -ev.stab, reason, ev.stabWorking || (ev.stab > 0 ? 'Stability cost' : 'Bought with 5 Influence'), a.actionNo));
+    var more = self.apply(a, ev.spec, ev);
+    if (more && more.length) lines = lines.concat(more);
     self.A.set(a.row, 'Ledger lines', lines.join(', '));
     self.setStatus(a, 'Applied'); a.spec = ev.spec;
     self.settleRuling(self.decisions['A' + a.actionNo]);
@@ -1835,7 +2167,7 @@ tpResolver_.prototype.phaseSpending = function () {
   });
 };
 
-tpResolver_.prototype.apply = function (a, sp) {
+tpResolver_.prototype.apply = function (a, sp, ev) {
   var w = this.world, n = a.nation, turn = this.turn, self = this;
   var N = this.model.tab('Nations'), nat = w.nation(n);
   switch (sp.type) {
@@ -1865,7 +2197,87 @@ tpResolver_.prototype.apply = function (a, sp) {
       this.log('Spending', n, 'Reform', 'Government now ' + sp.gov + '; check the Fiscal tab for lines out of bounds', 'Yes', a.actionNo);
       break;
     case 'STABILITY': case 'CHARGE_ONLY': case 'STAB_ONLY': break;
+    case 'DISMANTLE': {
+      var S = w.sys(sp.sys), list = String(S.get('Buildings') || '').split(/\s*,\s*/).filter(function (x) { return x; });
+      var i = list.indexOf(sp.building);
+      if (i >= 0) list.splice(i, 1);
+      S.set('Buildings', list.join(', '));
+      var dl = this.simFor(n).dismantled[sp.sys] || [], j = dl.indexOf(sp.building);
+      if (j >= 0) dl.splice(j, 1);   // the sheet now shows it gone; the sim must not remove it twice
+      this.log('Spending', n, 'Dismantled', sp.building + ' dismantled at ' + w.label(sp.sys) + '; ' + (sp.refund || 0) + ' Industry refunded' + (sp.slot ? '; its slot is free' : ''), 'No', a.actionNo);
+      break;
+    }
+    case 'REMEDIATE':
+      // Degradation is kept in the Ledger under the system's ID, as the World toll writes it.
+      var line = this.ledger('Spending', sp.sys, 'Degradation', -sp.points, 'Remediation by ' + n, (ev && ev.elab) || (sp.points + ' points removed'), a.actionNo);
+      this.log('Spending', n, 'Remediation', w.label(sp.sys) + ': ' + sp.points + ' Degradation removed', 'No', a.actionNo);
+      return [line];
+    case 'STIPEND': {
+      var St = TURN_CONFIG.STIPEND;
+      this.model.tab('Standing effects').add('Nation', { 'Nation': n, 'Resource': St.resource, 'Amount per turn': -St.units, 'Phase': 'Upkeep', 'Reason': St.reason,
+        'Working': St.units + ' Living compounds a turn sustain +1 Stability target (at most +1); first paid Turn ' + turn + ' (Actions row ' + a.actionNo + ')',
+        'From turn': turn + 1, 'Until turn': '', 'Group': '', 'Active': 'Yes', 'Source': 'Turn script' });
+      var okT = this.bumpNation(n, TURN_CONFIG.TEMP_TARGET_COLUMN, 1, 'Living compounds stipend', a.actionNo);
+      this.log('Spending', n, 'Stipend', 'Living compounds stipend: ' + St.units + ' a turn from now on; +1 Stability target while paid' + (okT ? '' : ' (GM: add the +1 by hand)'), 'No', a.actionNo);
+      break;
+    }
+    case 'CHARTER': {
+      var SE = this.model.tab('Standing effects'), have = w.standingRows(n, function (r) { return /^charter\b/i.test(r.reason); }).length;
+      for (var k = 1; k <= sp.n; k++) {
+        SE.add('Nation', { 'Nation': n, 'Resource': 'Influence', 'Amount per turn': -sp.each, 'Phase': 'Upkeep', 'Reason': 'Charter ' + (have + k),
+          'Working': '3 Influence x systems held / 5, recalculated each turn (' + sp.systems + ' systems now); +1 Administrative Capacity; lapses in any turn it is not paid',
+          'From turn': turn + 1, 'Until turn': '', 'Group': '', 'Active': 'Yes', 'Source': 'Turn script' });
+      }
+      var okC = this.bumpNation(n, TURN_CONFIG.ADMIN_CAPACITY_COLUMN, sp.n, 'Charters', a.actionNo);
+      this.log('Spending', n, 'Charter', sp.n + ' charter' + (sp.n > 1 ? 's' : '') + ' taken: +' + sp.n + ' Administrative Capacity' + (okC ? '' : ' (GM: raise capacity by hand)'), 'Yes', a.actionNo);
+      break;
+    }
+    case 'FIRST_CONTACT': {
+      var tn = w.nation(sp.target), me = w.nation(n), myName = (me && me.name) || n, tName = (tn && tn.name) || sp.target;
+      if (sp.already) { this.log('Spending', n + ', ' + sp.target, 'Contact', myName + ' also called on ' + tName + '; first contact was made this turn', 'No', a.actionNo); break; }
+      this.log('Spending', n + ', ' + sp.target, 'First contact', myName + ' and ' + tName + ' make first contact (' + myName + ' called; ' + sp.dist + ' lanes). Diplomacy may begin next turn.', 'Yes', a.actionNo);
+      w.addContact(n, sp.target, turn);
+      this.event(n, 'First contact', 'First contact with ' + tName, 'We made first contact with ' + tName + '. Treaties, trade and transfers may begin next turn.', a.actionNo);
+      this.event(sp.target, 'First contact', 'First contact: ' + myName, myName + ' has called on us and made first contact. We may answer or ignore the call; diplomacy may begin next turn.', a.actionNo);
+      break;
+    }
   }
+};
+
+/** Adds delta to a Nations column (a plain number cell). Skipped with a Turn log line if the column is
+ *  missing or holds a formula. Returns true when written. */
+tpResolver_.prototype.bumpNation = function (nid, col, delta, why, actionRow) {
+  var N = this.model.tab('Nations'), nat = this.world.nation(nid);
+  if (!nat || N.c(col) < 0) { this.log('Spending', nid, 'Column missing', 'Nations has no "' + col + '" column: ' + why + ' ' + tpSigned_(delta) + ' not written', 'No', actionRow || ''); return false; }
+  try { N.set(nat.row, col, tpRound2_(tpNum_(N.get(nat.row, col)) + delta)); return true; }
+  catch (e) { this.log('Spending', nid, 'Column not written', why + ' ' + tpSigned_(delta) + ': ' + e.message, 'No', actionRow || ''); return false; }
+};
+
+/** A row on the GM's Events tab (shown on the nation's page). Skipped with one Turn log line if the tab is missing. */
+tpResolver_.prototype.event = function (nid, kind, title, text, actionRow) {
+  if (this.eventsTab === undefined) this.eventsTab = tpTryTab_(this.model, 'Events');
+  if (!this.eventsTab) {
+    if (!this.eventsWarned) { this.log('Diplomacy', 'All', 'Events tab missing', 'No Events tab: notices to players are in the Turn log only', 'No', ''); this.eventsWarned = true; }
+    return;
+  }
+  try {
+    this.eventsTab.add('Turn', { 'Turn': this.turn, 'Nations': nid, 'Kind': kind, 'Title': title, 'Text': text, 'Shown to player': 'Yes', 'Source': 'Turn script' });
+  } catch (e) { this.log('Diplomacy', nid, 'Event not written', title + ': ' + e.message, 'No', actionRow || ''); }
+};
+
+/** Delivers a TREATY proposal, offer or decline: an Events row for each party. */
+tpResolver_.prototype.treatyNotice = function (a, sp) {
+  var w = this.world, me = w.nation(a.nation), to = w.nation(sp.to);
+  var myName = (me && me.name) || a.nation, toName = (to && to.name) || sp.to;
+  var said = /[.!?)]$/.test(String(sp.text).trim()) ? String(sp.text).trim() : String(sp.text).trim() + '.';
+  if (sp.mode === 'reply') {
+    this.event(sp.to, 'Notice', 'Reply from ' + myName, myName + ': ' + said, a.actionNo);
+    this.event(a.nation, 'Notice', 'Reply sent to ' + toName, 'Delivered to ' + toName + ': ' + said, a.actionNo);
+  } else {
+    this.event(sp.to, 'Treaty proposed', 'Proposal from ' + myName, myName + ' proposes: ' + said + ' Answer in your next orders (TREATY ' + myName + ': accept / decline ...).', a.actionNo);
+    this.event(a.nation, 'Notice', 'Proposal sent to ' + toName, 'Delivered to ' + toName + ': ' + said + ' Answered next turn.', a.actionNo);
+  }
+  this.log('Diplomacy', a.nation + ', ' + sp.to, sp.mode === 'reply' ? 'Treaty reply' : 'Treaty proposed', myName + ' to ' + toName + ': ' + sp.text, 'No', a.actionNo);
 };
 
 tpResolver_.prototype.addWork = function (n, kind, item, sys, completes, row) {
@@ -2016,8 +2428,17 @@ tpResolver_.prototype.phaseStandingEffects = function () {
     if (until !== '' && turn > tpNum_(until)) return;
     var n = w.nation(nid);
     if (!n || n.status === 'Eliminated') return;
-    due.push({ r: r + 1, nid: nid, res: res, amt: amt, phase: String(T.get(r, 'Phase') || '').trim() || (amt > 0 ? 'Income' : 'Upkeep'),
-      reason: String(T.get(r, 'Reason') || 'Standing effect'), working: String(T.get(r, 'Working') || ''), group: String(T.get(r, 'Group') || '').trim() });
+    var reason = String(T.get(r, 'Reason') || 'Standing effect'), scripted = String(T.get(r, 'Source') || '') === 'Turn script';
+    var kind = scripted && /^charter\b/i.test(reason) ? 'charter' : scripted && reason === TURN_CONFIG.STIPEND.reason ? 'stipend' : '';
+    var working = String(T.get(r, 'Working') || '');
+    if (kind === 'charter') {
+      // Charter upkeep follows the systems held: 3 Influence x systems held / 5.
+      var held = w.systems.filter(function (s) { return s.get('Owner') === nid; }).length;
+      amt = -tpRound1_(TURN_CONFIG.CHARTER.influencePerSystem * held / TURN_CONFIG.CHARTER.divisor);
+      working = '3 Influence x ' + held + ' systems held / 5 = ' + (-amt);
+    }
+    due.push({ r: r + 1, row: r, nid: nid, res: res, amt: amt, phase: String(T.get(r, 'Phase') || '').trim() || (amt > 0 ? 'Income' : 'Upkeep'),
+      reason: reason, working: working, group: String(T.get(r, 'Group') || '').trim(), kind: kind });
   });
   var groups = {};
   due.forEach(function (e) { var k = e.nid + '|' + (e.group || ('row' + e.r)); (groups[k] = groups[k] || []).push(e); });
@@ -2029,6 +2450,14 @@ tpResolver_.prototype.phaseStandingEffects = function () {
     Object.keys(need).forEach(function (res) { if (w.stock(list[0].nid, res) + 1e-9 < need[res]) short.push(need[res] + ' ' + res); });
     if (short.length) {
       self.log('Standing effects', list[0].nid, 'Standing effect skipped', list[0].reason + ': not applied this turn, short of ' + short.join(' and '), 'No', '');
+      // A charter or a Living compounds stipend lapses at once in a turn it is not paid.
+      list.forEach(function (e) {
+        if (!e.kind) return;
+        T.set(e.row, 'Active', 'No'); T.set(e.row, 'Until turn', turn - 1);
+        if (e.kind === 'charter') self.bumpNation(e.nid, TURN_CONFIG.ADMIN_CAPACITY_COLUMN, -1, e.reason + ' lapsed', '');
+        else self.bumpNation(e.nid, TURN_CONFIG.TEMP_TARGET_COLUMN, -1, 'Living compounds stipend lapsed', '');
+        self.log('Standing effects', e.nid, 'Lapsed', e.reason + ' lapses: its upkeep could not be paid', 'Yes', '');
+      });
       return;
     }
     list.forEach(function (e) {
@@ -2573,6 +3002,118 @@ tpWorld_.prototype.atWar = function (nid) {
   });
 };
 
+// ---------- Contact between nations, lane reach, standing effects ----------
+/** Lane distances from a set of systems, breadth-first over the Lanes tab (no limit). */
+tpWorld_.prototype.lanesFrom = function (sources) {
+  var adj = this.adj, dist = {}, q = [];
+  sources.forEach(function (s) { if (dist[s] === undefined) { dist[s] = 0; q.push(s); } });
+  while (q.length) {
+    var u = q.shift();
+    (adj[u] || []).forEach(function (v) { if (dist[v] === undefined) { dist[v] = dist[u] + 1; q.push(v); } });
+  }
+  return dist;
+};
+/** Nation IDs named in a cell such as "KRT, MRC" or "Kharos and Tessaly". */
+tpWorld_.prototype.nationIds = function (text) {
+  var self = this;
+  return String(text || '').split(/\s*(?:[,;&\/]|\band\b)\s*/i).map(function (x) { var n = x.trim() ? self.nationByName(x.trim()) : null; return n ? n.id : ''; })
+    .filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+};
+/** Nation IDs mentioned anywhere in a line, in the order written. Names and short names match in any
+ *  case; IDs only as written (upper case), so a short ID never matches an ordinary word. */
+tpWorld_.prototype.nationMentions = function (text) {
+  var self = this, raw = ' ' + String(text || '') + ' ', t = ' ' + tpNorm_(text) + ' ', hits = [];
+  function look(hay, needle, id) {
+    var mm = hay.match(new RegExp('[^A-Za-z0-9]' + tpEscapeRe_(needle) + '(?=[^A-Za-z0-9])'));
+    if (mm) hits.push({ id: id, at: mm.index });
+  }
+  this.nations.forEach(function (n) {
+    if (n.name) look(t, tpNorm_(n.name), n.id);
+    if (n.id && n.id.length >= 2) look(raw, n.id, n.id);
+  });
+  Object.keys(this.shortNames).forEach(function (k) { if (k.length >= 3) look(t, k, self.shortNames[k]); });
+  hits.sort(function (a, b) { return a.at - b.at; });
+  return hits.map(function (h) { return h.id; }).filter(function (x, i, a) { return a.indexOf(x) === i; });
+};
+function tpPairKey_(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
+function tpTryTab_(model, name) {
+  try {
+    if (!TURN_CONFIG.NEW_TABS[name] && model.ss && model.ss.getSheetByName && !model.ss.getSheetByName(name)) return null;
+    return model.tab(name);
+  } catch (e) { return null; }
+}
+/** Contact on record (rules, First Contact: once made it holds for both). Read from the Turn log
+ *  (First contact, Treaty, Trade), the Treaties tab, the Debts tab and Events of Kind First contact. */
+tpWorld_.prototype.contacts = function () {
+  if (this._contacts) return this._contacts;
+  var self = this, out = {};
+  function pairAll(ids, how, turn) {
+    for (var i = 0; i < ids.length; i++) for (var j = i + 1; j < ids.length; j++) {
+      var k = tpPairKey_(ids[i], ids[j]);
+      if (!out[k]) out[k] = { how: how, turn: turn };
+    }
+  }
+  var TL = tpTryTab_(this.model, 'Turn log');
+  if (TL) TL.rows().forEach(function (r) {
+    var ev = String(TL.get(r, 'Event') || '').trim();
+    if (!/^(?:first contact|treaty|trade)$/i.test(ev)) return;
+    pairAll(self.nationIds(TL.get(r, 'Nations')), 'Turn log: ' + ev + ', Turn ' + TL.get(r, 'Turn'), tpNum_(TL.get(r, 'Turn')));
+  });
+  var T = tpTryTab_(this.model, 'Treaties');
+  if (T) T.rows().forEach(function (r) {
+    var ids = self.nationIds([T.get(r, 'Party 1'), T.get(r, 'Party 2'), T.get(r, 'Parties'), T.get(r, 'Fee payer'), T.get(r, 'Fee payee')].join(', '));
+    pairAll(ids, 'treaty ' + (T.get(r, 'Treaty ID') || 'on record'), 0);
+  });
+  var D = tpTryTab_(this.model, 'Debts');
+  if (D) D.rows().forEach(function (r) { pairAll(self.nationIds([D.get(r, 'Debtor'), D.get(r, 'Creditor')].join(', ')), 'debt ' + (D.get(r, 'Debt ID') || 'on record'), 0); });
+  var E = tpTryTab_(this.model, 'Events');
+  if (E) E.rows().forEach(function (r) {
+    if (tpNorm_(E.get(r, 'Kind')) !== 'first contact') return;
+    pairAll(self.nationIds(E.get(r, 'Nations')), 'Events: First contact, Turn ' + E.get(r, 'Turn'), tpNum_(E.get(r, 'Turn')));
+  });
+  this._contacts = out;
+  return out;
+};
+tpWorld_.prototype.contactWith = function (a, b) { return this.contacts()[tpPairKey_(a, b)] || null; };
+tpWorld_.prototype.addContact = function (a, b, turn) { this.contacts()[tpPairKey_(a, b)] = { how: 'First contact, Turn ' + turn, turn: turn, made: true }; };
+/** Not contact, but a sign of it: b holds a system that a holds beside, or has discovered. Used to send
+ *  a line to the GM rather than reject it. */
+tpWorld_.prototype.neighbouring = function (a, b) {
+  var self = this, own = {}, why = '';
+  this.systems.forEach(function (s) { if (s.get('Owner') === a) own[s.id] = true; });
+  this.systems.forEach(function (s) {
+    if (why || s.get('Owner') !== b) return;
+    var disc = String(s.get('Discovered by') || '').split(/\s*[,;]\s*/).indexOf(a) >= 0;
+    var beside = (self.adj[s.id] || []).some(function (x) { return own[x]; });
+    if (disc || beside) why = self.label(s.id) + ', held by ' + b + ', is ' + (beside ? 'next to ' + a + '\'s space' : 'charted by ' + a);
+  });
+  return why;
+};
+/** Active Standing effects rows of a nation that pass test({ r, res, amt, reason, source }). */
+tpWorld_.prototype.standingRows = function (nid, test) {
+  var T = tpTryTab_(this.model, 'Standing effects'), out = [], turn = this.turnNo || 0;
+  if (!T) return out;
+  T.rows().forEach(function (r) {
+    if (String(T.get(r, 'Nation')).trim() !== nid || !/^y/i.test(String(T.get(r, 'Active')))) return;
+    var until = T.get(r, 'Until turn');
+    if (until !== '' && turn && turn > tpNum_(until)) return;
+    var o = { r: r, res: String(T.get(r, 'Resource')).trim(), amt: tpNum_(T.get(r, 'Amount per turn')), reason: String(T.get(r, 'Reason') || ''), source: String(T.get(r, 'Source') || '') };
+    if (!test || test(o)) out.push(o);
+  });
+  return out;
+};
+/** The turn of a Stability purchase paid in Marks within the last two turns, or 0 (a second within 3 turns costs double). */
+tpWorld_.prototype.recentMarksStability = function (nid) {
+  var L = this.ledgerTab, turn = this.turnNo || 0, hit = 0;
+  if (!turn) return 0;
+  L.rows().forEach(function (r) {
+    var t = tpNum_(L.get(r, 'Turn'));
+    if (t < turn - 2 || t >= turn || L.get(r, 'Nation') !== nid || L.get(r, 'Resource') !== TURN_CONFIG.MARKS) return;
+    if (/^STABILITY\b/.test(String(L.get(r, 'Reason') || '')) && tpNum_(L.get(r, 'Amount')) < 0) hit = Math.max(hit, t);
+  });
+  return hit;
+};
+
 // Population
 tpWorld_.prototype.worldRows = function (sid) {
   var Wt = this.worldsTab;
@@ -2722,12 +3263,15 @@ tpWorld_.prototype.newSim = function (n, phase, resolver) {
     tiers: Object.assign({}, n.tiers), stability: stab, owned: owned, colonized: {}, taken: {}, devRaised: {}, desigChanged: {}, desigNow: {},
     slotsAdded: {}, newBuildings: {}, shipCapAdded: 0, armyCapAdded: 0, staticAdded: {}, researched: {}, moved: {},
     shifted: false, stabBought: false, reformed: false, settlersOut: 0, settlersFrom: {},
+    dismantled: {}, remediated: {}, colonyCount: 0, contacted: {}, stipend: false, charters: 0, targetBonus: 0,
     ownsActive: function (sid) { var s = self.sys(sid); return !!(owned[sid] && s && !String(s.get('Status') || '').trim()); },
     devOf: function (sid) { return tpNum_(self.sys(sid).get('Development')); },
     desigOf: function (sid) { return this.desigNow[sid] || String(self.sys(sid).get('Designation') || '').trim(); },
     hasCivic: function (cv) { return this.civics.indexOf(cv) >= 0; },
     buildingsOf: function (sid) {
       var b = String(self.sys(sid).get('Buildings') || '').split(/\s*,\s*/).filter(function (x) { return x; });
+      // Buildings dismantled earlier in these orders are gone (their slots are free).
+      (this.dismantled[sid] || []).forEach(function (d) { var i = b.indexOf(d); if (i >= 0) b.splice(i, 1); });
       var wip = self.model.tab('Works in progress');
       wip.rows().forEach(function (r) { if (wip.get(r, 'System') === sid && wip.get(r, 'Status') === 'Under way' && wip.get(r, 'Kind') === 'Building') b.push(String(wip.get(r, 'Item'))); });
       return b.concat(this.newBuildings[sid] || []);

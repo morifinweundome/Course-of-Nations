@@ -407,7 +407,7 @@ function pfExtras_(W, n, rec, ss) {
   });
   [['Oceanic', 'Colony cost: Oceanic world'], ['Garden', 'Colony cost: Garden world'], ['Barren, Frozen, Arid, Volcanic or Toxic', 'Colony cost: Barren, Frozen, Arid, Volcanic or Toxic world']].forEach(function (w) {
     var v = c.num(w[1]) || 5;
-    P.push(['Colonies', 'Colony on ' + (/^[AEIOU]/.test(w[0]) ? 'an ' : 'a ') + w[0] + ' world', '', v, '', v, '', '', 'Yes', 'Unclaimed, within ' + reachCol + ' lane' + (reachCol > 1 ? 's' : '') + ' of a held system; farther needs an expedition at the same cost']);
+    P.push(['Colonies', 'Colony on ' + (/^[AEIOU]/.test(w[0]) ? 'an ' : 'a ') + w[0] + ' world', '', v, '', v, '', '', 'Yes', 'Unclaimed, within ' + reachCol + ' lane' + (reachCol > 1 ? 's' : '') + ' of a held system; farther needs an expedition at the same cost; each further colony ordered the same turn costs 5 Influence more']);
   });
   pfBlock_(W.tables, 'Category').forEach(function (r) {
     if (!r['Category'] || r['Category'] === 'Category') return;
