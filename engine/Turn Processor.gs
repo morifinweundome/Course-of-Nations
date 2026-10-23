@@ -1160,7 +1160,7 @@ function tpEvMove_(world, sim, args, phase) {
     if (!m2) return tpRuling_('Route not readable (write MOVE <force>: <from> > <to>)', 'No destination found', 'Identify the move.');
     forceText = m2[1]; route = '> ' + m2[2];
   }
-  route = route.replace(/\s*[;,].*$/, '').replace(/\s*\([^()]*\)\s*$/, '');
+  route = route.replace(/\s*\([^()]*\)/g, '').replace(/\s*[;,].*$/, '');
   var f = world.findForce(sim.nid, forceText);
   if (!f) return tpRuling_('Force not found: "' + forceText + '"', 'No force of this nation by that name or ID', 'Identify the force.');
   if (sim.moved[f.row]) return tpReject_('This force already moves this turn');
