@@ -86,7 +86,7 @@ function pfWorkbook_(book) {
     lanes: pfRows_(pfTab_(book, 'Lanes')), treaties: pfRows_(pfTab_(book, 'Treaties')),
     debts: pfRows_(pfTab_(book, 'Debts')), inbox: pfRows_(pfTab_(book, 'Orders inbox')),
     tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control')),
-    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), unlocks: pfRows_(pfTab_(book, 'Unlocks')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
+    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), unlocks: pfRows_(pfTab_(book, 'Unlocks')), exchange: pfRows_(pfTab_(book, 'Exchange')), exorders: pfRows_(pfTab_(book, 'Exchange orders')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
   };
   W.nations.forEach(function (n) { n.id = n.get('Nation ID'); });
   pfRows_(pfTab_(book, 'Calculations')).forEach(function (c) { W.calc[c.get('Nation ID')] = c; });
@@ -236,12 +236,16 @@ function pfRecord_(W, n) {
 
   // systems held
   var sys = [['System ID', 'Name', 'Sector', 'Class', 'Environment', 'Designation', 'Development', 'Development cap', 'Buildings',
-    'Slots', 'Slots used', 'Condition', 'Strain', 'Population (bn)', 'Carrying capacity (bn)', 'Industry', 'Energy', 'Research', 'Influence', 'Growth due (bn)', 'Overcrowded']];
+    'Slots', 'Slots used', 'Condition', 'Strain', 'Population (bn)', 'Carrying capacity (bn)', 'Industry', 'Energy', 'Research', 'Influence', 'Growth due (bn)', 'Overcrowded', 'Orbital slots', 'Orbital used']];
+  var orbital = ['Habitat Station'];
+  W.unlocks.forEach(function (u) { if (/orbital/i.test(u.get('Takes a slot')) && orbital.indexOf(u.get('Building')) < 0) orbital.push(u.get('Building')); });
   W.systems.filter(function (s) { return s.get('Owner') === id; }).forEach(function (s) {
     sys.push([s.get('System ID'), s.get('Name'), s.get('Sector'), s.get('Class'), s.get('Environment'), s.get('Designation'),
       s.get('Development'), s.get('Effective Development cap') || s.get('Development cap'), s.get('Buildings'), s.get('Slots'), s.get('Slots used'),
       s.get('Condition'), s.get('Strain'), s.get('Population (bn)'), s.get('Carrying capacity (bn)'),
-      s.get('Industry'), s.get('Energy'), s.get('Research'), s.get('Influence'), s.get('Growth due (bn)'), s.get('Overcrowded')]);
+      s.get('Industry'), s.get('Energy'), s.get('Research'), s.get('Influence'), s.get('Growth due (bn)'), s.get('Overcrowded'),
+      1 + (s.num('Development') >= 4 ? 1 : 0),
+      String(s.get('Buildings')).split(/\s*,\s*/).filter(function (b) { return orbital.indexOf(b.replace(/\s*\(.*\)\s*$/, '')) >= 0; }).length]);
   });
 
   // worlds (same layout the star map's private link reads)
@@ -413,7 +417,7 @@ function pfExtras_(W, n, rec, ss) {
   // hidden buildings this nation has unlocked (Unlocks tab): listed for it alone
   W.unlocks.forEach(function (u) {
     if (u.get('Nation') !== id || !u.get('Building') || u.get('Shown to player') === 'No') return;
-    var slot = /^n/i.test(u.get('Takes a slot')) ? 'takes no building slot' : 'takes a building slot';
+    var slot = /orbital/i.test(u.get('Takes a slot')) ? 'takes an orbital slot' : /^n/i.test(u.get('Takes a slot')) ? 'takes no building slot' : 'takes a building slot';
     P.push(['Buildings', u.get('Building'), u.get('Industry'), '', '', '', u.get('Strategic'), u.get('Requires'), pfMeets_(u.get('Requires'), tiers) ? 'Yes' : 'No',
       [u.get('Effect'), slot, u.get('Strain') ? 'Strain ' + u.get('Strain') : '', Number(u.get('Turns')) > 1 ? 'takes ' + u.get('Turns') + ' turns' : ''].filter(String).join('; ')]);
   });
@@ -518,6 +522,9 @@ function pfExtras_(W, n, rec, ss) {
   // ---- turn reports: accounts by turn, order outcomes, and the GM's written report
   pfReports_(W, n, rec);
 
+  // ---- the Galactic Exchange: public prices (last ten turns), this nation's treasury and standing orders
+  pfExchange_(W, n, rec);
+
   // ---- history: one line per turn, kept across refreshes
   var H = [['Turn', 'Industry', 'Energy', 'Research', 'Influence', 'Stability', 'Systems held', 'Fleet Power', 'Population (bn)', 'GDP (SM)']];
   var old = ss.getSheetByName('History');
@@ -539,7 +546,7 @@ function pfExtras_(W, n, rec, ss) {
  */
 function pfReports_(W, n, rec) {
   var id = n.id, KEEP = 10, first = Math.max(0, W.turn - KEEP + 1);
-  var mains = PF_MAIN.concat(PF_STRAT, PF_ADV);
+  var mains = PF_MAIN.concat(PF_STRAT, PF_ADV, [PF_MARKS]);
   var lines = W.ledger.filter(function (l) { return l.get('Nation') === id && l.get('Shown to player') !== 'No' && mains.indexOf(l.get('Resource')) >= 0; })
     .sort(function (a, b) { return a.num('Turn') - b.num('Turn') || a.num('Entry') - b.num('Entry'); });
   var bal = {}, acc = {};
@@ -582,4 +589,29 @@ function pfReports_(W, n, rec) {
     .sort(function (a, b) { return b.num('Turn') - a.num('Turn') || a.row - b.row; })
     .forEach(function (r) { R.push([r.get('Turn'), r.get('Section') || 'Report', r.get('Action row'), r.get('Heading'), r.get('Text')]); });
   rec.Reports = R;
+}
+
+
+/* ------------------------------------------------------------------ the Galactic Exchange */
+
+var PF_MARKS = 'Stellar Marks';
+var PF_BASE = { Industry: 1, Energy: 1, Research: 2, Influence: 1 };
+
+function pfExchange_(W, n, rec) {
+  var id = n.id;
+  var E = [['Turn', 'Resource', 'Base', 'Price', 'Target', 'Depth', 'Inventory', 'Bought by Exchange', 'Sold by Exchange', 'Trades']];
+  var rows = W.exchange.filter(function (r) { return r.get('Resource') && r.num('Turn') > W.turn - 10; });
+  if (rows.length) rows.forEach(function (r) { E.push([r.get('Turn'), r.get('Resource'), r.get('Base'), r.get('Price'), r.get('Target'), r.get('Depth'), r.get('Inventory'), r.get('Bought by Exchange'), r.get('Sold by Exchange'), r.get('Trades')]); });
+  else PF_MAIN.concat(PF_STRAT).forEach(function (k) {
+    var base = PF_BASE[k] || 10, strat = PF_STRAT.indexOf(k) >= 0;
+    E.push([W.turn, k, base, base, base, strat ? 5 : 10, 0, 0, 0, 0]);
+  });
+  rec.Exchange = E;
+  var O = [['Order ID', 'Side', 'Resource', 'Remaining', 'Limit', 'Slice', 'Turns left', 'Placed (turn)', 'Status', 'Note']];
+  W.exorders.filter(function (r) { return r.get('Nation') === id && (r.get('Status') === 'Open' || r.num('Placed (turn)') > W.turn - 3); })
+    .forEach(function (r) { O.push([r.get('Order ID'), r.get('Side'), r.get('Resource'), r.get('Remaining'), r.get('Limit'), r.get('Slice'), r.get('Turns left'), r.get('Placed (turn)'), r.get('Status'), r.get('Note')]); });
+  rec['Exchange orders'] = O;
+  var marks = 0;
+  W.ledger.forEach(function (l) { if (l.get('Nation') === id && l.get('Resource') === PF_MARKS) marks += l.num('Amount'); });
+  rec.Stockpiles.push([PF_MARKS, 'Treasury', pfRound_(marks), 0, 0, 0, 0, pfRound_(marks)]);
 }

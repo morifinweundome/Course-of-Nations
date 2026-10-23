@@ -138,6 +138,10 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .rp .oc{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--line2)}
 .rp .oc:last-child{border-bottom:0}.rp .oc .o{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--chrome);word-break:break-word}
 .rp .oc .nt{grid-column:2;font-size:13px;color:var(--muted)}
+.ex-board td .spark{display:block}
+.ex-board .bs{display:flex;gap:4px;justify-content:flex-end}
+.ex-board .bs button{font:inherit;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:none;color:var(--chrome);cursor:pointer}
+.ex-board .bs button:hover{border-color:var(--gold);color:var(--gold)}
 .evarc{margin-top:12px}.evarc summary{cursor:pointer;color:var(--chrome);font-weight:700;font-size:14px;padding:6px 0}
 .evarc h3{font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 8px}
 .aff{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
@@ -217,6 +221,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       <button class="tab" role="tab" aria-selected="true" data-p="overview">Overview</button>
       <button class="tab" role="tab" aria-selected="false" data-p="plan">Plan the turn</button>
       <button class="tab" role="tab" aria-selected="false" data-p="write">Write orders</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="exchange">Exchange</button>
       <button class="tab" role="tab" aria-selected="false" data-p="ask">Ask the GM<span class="n" id="nA"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="realm">Systems &amp; worlds<span class="n" id="nS"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="forces">Forces<span class="n" id="nF"></span></button>
@@ -354,6 +359,28 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <p class="note">Finished works for the Galactic Archives (lore, art, histories) go in through the <a id="arcForm" target="_blank" rel="noopener">archive form</a>.</p>
       </div>
     </section>
+    <section id="p-exchange" hidden>
+      <div class="group">
+        <h2>The Galactic Exchange <span class="clock" id="exTurn"></span></h2>
+        <p class="note">The Exchange buys and sells every main and strategic resource for Stellar Marks. It buys 10% below its price and sells 10% above; each unit traded moves the price, and no nation may trade more than one depth of a resource in a turn. It sells only what it holds. Orders settle in the Exchange phase, after Income and before Spending.</p>
+        <div class="vit" id="exVitals"></div>
+      </div>
+      <div class="group">
+        <h2>Prices</h2>
+        <div id="exBoard"></div>
+      </div>
+      <div class="group">
+        <h2>Your Exchange basket</h2>
+        <p class="note">Estimates use this turn's published price and the slippage of each order; the fill is settled at the moment your order comes up. Orders here are part of your turn's orders: they appear under Write orders and are sent with them.</p>
+        <div class="bk-add"><button type="button" data-add="BUY">+ Buy</button><button type="button" data-add="SELL">+ Sell</button></div>
+        <div id="exList"></div>
+        <div id="exSum"></div>
+      </div>
+      <div class="group">
+        <h2>Standing orders</h2>
+        <div id="exOrders"></div>
+      </div>
+    </section>
     <section id="p-ask" hidden>
       <div class="group">
         <h2>Ask the game master</h2>
@@ -459,7 +486,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   // Buildings in the rules that the price list does not carry.
   var BK_EXTRA = [
     { Item: 'Military College', Industry: '15', Strategic: '', Requires: 'Military Tier 2; takes 2 turns; once per nation', once: 'nation' },
-    { Item: 'Habitat Station', Industry: '12', Strategic: '', Requires: 'Society Tier 2; orbital, takes no building slot', orbital: true },
+    { Item: 'Habitat Station', Industry: '12', Strategic: '', Requires: 'Society Tier 2; orbital, takes an orbital slot', orbital: true },
     { Item: 'Arcology', Industry: '20', Strategic: '1 Lattice crystals', Requires: 'Industry Tier 4; Development 3; takes 2 turns' },
     { Item: 'Planetary Shield', Industry: '20', Strategic: '2 Lattice crystals', Requires: 'Military Tier 4; takes 2 turns' },
     { Item: 'Orbital Fortress', Industry: '25', Strategic: '2 Adamant ore', Requires: 'Military Tier 3; takes 2 turns' },
@@ -486,7 +513,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function bkBuildings() {
     var list = BK.prices.filter(function (r) { return r['Group'] === 'Buildings' && num(r['Industry']) > 0 && r['Unlocked'] !== ''; })
       .map(function (r) { return { Item: r['Item'], Industry: r['Industry'], Strategic: r['Strategic'], Requires: r['Requires'], locked: r['Unlocked'] === 'No',
-        once: /once per nation/i.test(r['Note'] || '') ? 'nation' : '' }; });
+        once: /once per nation/i.test(r['Note'] || '') ? 'nation' : '', orbital: /orbital slot/i.test(r['Note'] || '') }; });
     BK_EXTRA.forEach(function (x) { if (!list.some(function (b) { return b.Item === x.Item; })) list.push(x); });
     return list;
   }
@@ -520,6 +547,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
           var free = num(s['Slots']) - used;
           if (free < 1) bad('No free building slot in ' + s['System ID'] + ' (' + num(s['Slots used']) + ' of ' + num(s['Slots']) + ' used' + (used > num(s['Slots used']) ? ', plus orders in this basket' : '') + ').');
           else out.msg = (free - 1) + ' slot' + (free - 1 === 1 ? '' : 's') + ' left in ' + s['System ID'] + ' after this.';
+        }
+        if (!out.cls && b.orbital) {
+          var isOrb = function (name) { var y = bkBuildings().filter(function (z) { return z.Item === String(name).replace(/\s*\(.*\)\s*$/, ''); })[0]; return !!(y && y.orbital); };
+          var oUsed = (s['Orbital used'] !== undefined && s['Orbital used'] !== '' ? num(s['Orbital used']) : have.filter(isOrb).length) +
+            others.filter(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && isOrb(x.what); }).length;
+          var oSlots = s['Orbital slots'] ? num(s['Orbital slots']) : 1 + (num(s['Development']) >= 4 ? 1 : 0);
+          if (oUsed >= oSlots) bad('No free orbital slot in ' + s['System ID'] + ' (' + oUsed + ' of ' + oSlots + ' used; one more opens at Development 4).');
+          else out.msg = (oSlots - oUsed - 1) + ' orbital slot' + (oSlots - oUsed - 1 === 1 ? '' : 's') + ' left in ' + s['System ID'] + ' after this.';
         }
         if (!out.cls && b.Requires) note('Requires: ' + b.Requires + '.' + (out.msg ? ' ' + out.msg : ''));
         if (!out.cls && out.msg) out.cls = 'ok';
@@ -597,6 +632,30 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         else note('Applied as the material\'s fixed effect when the turn is prepared.');
         break;
       }
+      case 'BUY': case 'SELL': {
+        var xr = exState()[r.what], q = Math.max(1, Math.round(num(r.qty) || 1)), over = Math.max(1, Math.round(num(r.over) || 1)), lim = num(r.lim);
+        if (!xr) { bad('Choose a resource.'); break; }
+        out.text = r.verb + ' ' + q + ' ' + r.what + (lim ? ' AT ' + lim + ' OR ' + (r.verb === 'SELL' ? 'MORE' : 'LESS') : '') + (over > 1 ? ' OVER ' + over + ' TURNS' : '');
+        if (lim && over > 1) { bad('An order may be limited or sliced over turns, not both.'); break; }
+        var now = Math.min(Math.ceil(q / over), xr.depth), f = exFill(xr, r.verb, now), est = Math.round(f.value * 10) / 10;
+        out.cost[r.what] = r.verb === 'SELL' ? Math.ceil(q / over) : -Math.ceil(q / over);
+        out.cost[EX_M] = r.verb === 'SELL' ? -est : est;
+        var held = num((STOCK[r.what] || {})['Stockpile']) + Math.max(0, num((STOCK[r.what] || {})['Projected']) - num((STOCK[r.what] || {})['Stockpile']));
+        var m = [r.verb === 'SELL' ? 'About ' + fmt(est) + ' Marks for ' + now + ' (' + fp(f.avg) + ' each)' : 'About ' + fmt(est) + ' Marks for ' + now + ' (' + fp(f.avg) + ' each)'];
+        if (Math.ceil(q / over) > xr.depth) m.push('only one depth (' + xr.depth + ') trades in a turn');
+        if (r.verb === 'BUY' && xr.inventory < now) m.push('the Exchange holds ' + fmt(xr.inventory) + ': the rest fills only if others sell first');
+        if (r.verb === 'SELL' && Math.ceil(q / over) > held) { bad('You will hold about ' + fmt(held) + ' ' + r.what + ' at the Exchange phase.'); break; }
+        if (r.verb === 'BUY' && (r.what === 'Research' || r.what === 'Influence')) m.push('at most 25% of your gross ' + r.what + ' may be bought in a turn');
+        if (over > 1) m.push(Math.ceil(q / over) + ' a turn for ' + over + ' turns');
+        if (lim) m.push((r.verb === 'SELL' ? 'sells only while the price holds at ' : 'buys only while the price stays at or under ') + lim + '; the rest lapses');
+        out.msg = m.join('; ') + '.'; out.cls = (r.verb === 'BUY' && xr.inventory < 1) || Math.ceil(q / over) > xr.depth ? 'wait' : 'ok';
+        break;
+      }
+      case 'CANCEL': {
+        if (!r.what) { bad('Choose a standing order.'); break; }
+        out.text = 'CANCEL ORDER ' + r.what; out.msg = 'Withdrawn before this turn\'s trading.'; out.cls = 'ok';
+        break;
+      }
       case 'STABILITY': {
         out.text = 'STABILITY'; out.cost.Influence = 5;
         if (others.some(function (x) { return x.verb === 'STABILITY'; })) bad('Stability may be bought once a turn.');
@@ -649,12 +708,22 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
           '<select data-f="what">' + bkOpt(BK_ADV.map(function (k) { return [k, k + ' · ' + fmt(num((STOCK[k] || {})['Stockpile'])) + ' held']; }), r.what, 'Material…') + '</select> ' +
           '<input data-f="purpose" placeholder="How, e.g. fit to the Cruisers built at II-07" value="' + esc(r.purpose || '') + '" style="min-width:260px">';
         break;
+      case 'BUY': case 'SELL':
+        f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +
+          '<select data-f="what">' + bkOpt(MAIN.concat(BK_STRAT), r.what, 'Resource…') + '</select> ' +
+          '<input type="number" min="0" step="0.01" data-f="lim" placeholder="Limit price" value="' + esc(r.lim || '') + '" style="width:110px"> ' +
+          '<select data-f="over">' + bkOpt([['1', 'This turn'], ['2', 'Over 2 turns'], ['3', 'Over 3 turns'], ['4', 'Over 4 turns'], ['5', 'Over 5 turns']], r.over || '1') + '</select>';
+        break;
+      case 'CANCEL':
+        f = '<select data-f="what">' + bkOpt(EXORD.filter(function (o) { return o['Status'] === 'Open'; }).map(function (o) { return [o['Order ID'], o['Order ID'] + ' · ' + o['Side'] + ' ' + o['Remaining'] + ' ' + o['Resource']]; }), r.what, 'Standing order…') + '</select>';
+        break;
       case 'STABILITY':
         f = '<span class="muted">One point of current Stability</span>';
         break;
     }
     var c = [];
-    MAIN.forEach(function (k) { if (ev.cost[k]) c.push(fmt(ev.cost[k]) + ' ' + ico(k)); });
+    if (ev.cost[EX_M]) c.push('≈ ' + fmt(-ev.cost[EX_M], true) + ' Marks');
+    else MAIN.forEach(function (k) { if (ev.cost[k]) c.push(fmt(ev.cost[k]) + ' ' + ico(k)); });
     Object.keys(ev.strat).forEach(function (k) { if (ev.strat[k]) c.push(fmt(ev.strat[k]) + ' ' + ico(k)); });
     return '<div class="bk-row" data-i="' + i + '"><span class="vb">' + esc(r.verb) + '</span>' + f +
       '<span class="cost">' + (c.length ? c.join(' · ') : '<span class="muted">costed at Prepare</span>') + '</span>' +
@@ -667,9 +736,10 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     if (!BK.draft) return;
     var rows = BK.draft.rows, evs = rows.map(function (r, i) { return bkEval(r, i, rows); });
     $('#bkList').innerHTML = rows.length ? rows.map(function (r, i) { return bkRowHtml(r, i, evs[i]); }).join('') : '<div class="none">Your basket is empty. Add an order above.</div>';
+    drawExBasket();
     var tot = {};
     evs.forEach(function (e) { Object.keys(e.cost).forEach(function (k) { tot[k] = (tot[k] || 0) + e.cost[k]; }); Object.keys(e.strat).forEach(function (k) { tot[k] = (tot[k] || 0) + e.strat[k]; }); });
-    var keys = MAIN.concat(BK_STRAT, BK_ADV).filter(function (k) { return tot[k]; });
+    var keys = MAIN.concat(BK_STRAT, BK_ADV, [EX_M]).filter(function (k) { return tot[k]; });
     var bad = evs.filter(function (e) { return e.cls === 'bad'; }).length;
     $('#bkSum').innerHTML = (keys.length ? '<p class="note">This turn\'s earnings arrive before orders are paid, so a turn may spend more than the current stockpile.</p>' +
       '<div class="tbl"><table><thead><tr><th>Resource</th><th class="n">Current stockpile</th><th class="n">Used this turn</th><th class="n">Earnings this turn</th><th class="n">Projected stockpile</th></tr></thead><tbody>' +
@@ -1013,6 +1083,63 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#fiscal').innerHTML = table(fiscal, [{ k: 'Instrument', f: function (v) { return '<b>' + esc(v) + '</b>'; } }, { k: 'Intensity' }, { k: 'As written', f: function (v) { return '<span class="muted">' + esc(v) + '</span>'; } }, { k: 'Since turn', n: 1 }], { empty: 'No fiscal code recorded.' });
   }
 
+  /* ---------- the Galactic Exchange ---------- */
+  var EX_M = 'Stellar Marks';
+  function exState() {
+    var last = {}, out = {};
+    EXROWS.forEach(function (r) { var t = num(r['Turn']); if (!last[r['Resource']] || t >= num(last[r['Resource']]['Turn'])) last[r['Resource']] = r; });
+    Object.keys(last).forEach(function (k) { var r = last[k]; out[k] = { base: num(r['Base']) || 1, price: num(r['Price']) || num(r['Base']) || 1, depth: Math.max(1, num(r['Depth'])), inventory: num(r['Inventory']) }; });
+    return out;
+  }
+  function exFill(x, side, q) {
+    var s = 0.5, D = Math.max(1, x.depth);
+    if (side === 'SELL') { var pb = x.price * 0.9, a = pb * (1 - s * q / (2 * D)); return { value: q * a, avg: a }; }
+    var ps = x.price * 1.1, b = ps * (1 + s * q / (2 * D)); return { value: q * b, avg: b };
+  }
+  function fp(n) { return (Math.round(n * 100) / 100).toFixed(2); }
+  function spark(vals) {
+    if (vals.length < 2) return '<span class="muted">—</span>';
+    var w = 90, h = 24, mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rg = mx - mn || 1;
+    var pts = vals.map(function (v, i) { return (i * w / (vals.length - 1)).toFixed(1) + ',' + (h - 2 - (v - mn) / rg * (h - 4)).toFixed(1); }).join(' ');
+    var up = vals[vals.length - 1] >= vals[0];
+    return '<svg class="spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '"><polyline fill="none" stroke="' + (up ? 'var(--up)' : 'var(--down)') + '" stroke-width="1.6" points="' + pts + '"/></svg>';
+  }
+  function drawExchange() {
+    var st = exState(), keys = MAIN.concat(BK_STRAT).filter(function (k) { return st[k]; });
+    var turns = EXROWS.map(function (r) { return num(r['Turn']); }), lt = turns.length ? Math.max.apply(null, turns) : 0;
+    $('#exTurn').textContent = lt ? 'Prices after turn ' + lt : '';
+    var marks = num((STOCK[EX_M] || {})['Stockpile']);
+    $('#exVitals').innerHTML = '<div class="vc"><div class="t">' + ico('Stellar Mark') + 'Treasury</div><div class="v">' + fmt(marks) + ' <small>Marks</small></div><div class="s">Marks come from sales, deals and bonds; they pay for purchases.</div></div>';
+    $('#exBoard').innerHTML = '<div class="tbl ex-board"><table><thead><tr><th>Resource</th><th class="n">Price</th><th class="n">It buys at</th><th class="n">It sells at</th><th class="n">Change</th><th>Trend</th><th class="n">Held by Exchange</th><th class="n">Depth</th><th class="n">You hold</th><th></th></tr></thead><tbody>' +
+      keys.map(function (k) {
+        var x = st[k], hist = EXROWS.filter(function (r) { return r['Resource'] === k; }).sort(function (a, b) { return num(a['Turn']) - num(b['Turn']); }).map(function (r) { return num(r['Price']); });
+        var prev = hist.length > 1 ? hist[hist.length - 2] : x.price;
+        return '<tr><td>' + ico(k) + esc(k) + '</td><td class="n"><b>' + fp(x.price) + '</b></td><td class="n">' + fp(x.price * 0.9) + '</td><td class="n">' + fp(x.price * 1.1) + '</td><td class="n">' + (Math.abs(x.price - prev) < 0.005 ? '<span class="d flat">—</span>' : '<span class="d ' + (x.price > prev ? 'up' : 'down') + '">' + (x.price > prev ? '+' : '−') + Math.abs(Math.round((x.price / prev - 1) * 1000) / 10) + '%</span>') + '</td><td>' + spark(hist) +
+          '</td><td class="n">' + fmt(x.inventory) + '</td><td class="n">' + fmt(x.depth) + '</td><td class="n">' + fmt(num((STOCK[k] || {})['Stockpile'])) + '</td>' +
+          '<td><div class="bs"><button type="button" data-exadd="BUY|' + esc(k) + '">Buy</button><button type="button" data-exadd="SELL|' + esc(k) + '">Sell</button></div></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    var open = EXORD.filter(function (o) { return o['Status'] === 'Open'; }), past = EXORD.filter(function (o) { return o['Status'] !== 'Open'; });
+    $('#exOrders').innerHTML = EXORD.length ? table(open.concat(past), [{ k: 'Order ID' }, { k: 'Side' }, { k: 'Resource', f: function (v) { return ico(v) + esc(v); } }, { k: 'Remaining', n: 1 }, { k: 'Limit', n: 1 }, { k: 'Turns left', n: 1 }, { k: 'Status' }, { k: 'Note' },
+      { k: 'Order ID', t: ' ', f: function (v, r) { return r['Status'] === 'Open' ? '<button class="btn" type="button" data-excancel="' + esc(v) + '">Cancel</button>' : ''; } }]) : '<div class="none">No standing orders. A limit order may stand for several turns, and a sliced order sells or buys a share each turn.</div>';
+    drawExBasket();
+  }
+  function drawExBasket() {
+    if (!BK.draft || !$('#exList')) return;
+    var rows = BK.draft.rows, idx = [];
+    rows.forEach(function (r, i) { if (r.verb === 'BUY' || r.verb === 'SELL' || r.verb === 'CANCEL') idx.push(i); });
+    $('#exList').innerHTML = idx.length ? idx.map(function (i) { return bkRowHtml(rows[i], i, bkEval(rows[i], i, rows)); }).join('') : '<div class="none">Nothing to trade yet. Press Buy or Sell on a price, or add an order above.</div>';
+    var inM = 0, outM = 0;
+    idx.forEach(function (i) { var e = bkEval(rows[i], i, rows), c = num(e.cost[EX_M]); if (c < 0) inM += -c; else outM += c; });
+    var marks = num((STOCK[EX_M] || {})['Stockpile']);
+    $('#exSum').innerHTML = idx.length ? '<div class="tbl"><table><tbody><tr><td>Marks from sales (estimate)</td><td class="n">' + fmt(inM, true) + '</td></tr><tr><td>Marks for purchases (estimate)</td><td class="n">' + fmt(-outM, true) + '</td></tr><tr><td>Treasury after trading</td><td class="n' + (marks + inM - outM < 0 ? ' short' : '') + '"><b>' + fmt(marks + inM - outM) + '</b></td></tr></tbody></table></div>' +
+      (marks + inM - outM < 0 ? '<p class="warn bad">The treasury cannot cover these purchases as estimated: some will fill only in part.</p>' : '') : '';
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target; if (!BK.draft || !t.dataset) return;
+    if (t.dataset.exadd) { var p = t.dataset.exadd.split('|'); BK.draft.rows.push({ verb: p[0], what: p[1], qty: 10, over: '1' }); bkSave(); drawBasket(); return; }
+    if (t.dataset.excancel) { if (!BK.draft.rows.some(function (r) { return r.verb === 'CANCEL' && r.what === t.dataset.excancel; })) BK.draft.rows.push({ verb: 'CANCEL', what: t.dataset.excancel }); bkSave(); drawBasket(); }
+  });
+
   var RP = { acc: [], out: [], rep: [], ev: [], st: [], turn: null };
   function drawReport(acc, out, rep, ev, st) {
     RP.acc = acc || []; RP.out = out || []; RP.rep = rep || []; RP.ev = ev || []; RP.st = st || [];
@@ -1071,7 +1198,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 
   /* ---------- decision aids ---------- */
-  var STOCK = {}, RECIPES = [];
+  var STOCK = {}, RECIPES = [], EXROWS = [], EXORD = [];
   function stratParse(t) { var o = {}; String(t || '').split(/\s*[;,]\s*/).forEach(function (p) { var m = p.match(/^([\d.]+)\s+(.+)$/); if (m) o[m[2]] = (o[m[2]] || 0) + num(m[1]); }); return o; }
 
   function drawSince(hist) {
@@ -1252,13 +1379,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function load() {
     VIEW = null;
     Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
-      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes'), soft('Accounts'), soft('Outcomes'), soft('Reports')])
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes'), soft('Accounts'), soft('Outcomes'), soft('Reports'), soft('Exchange'), soft('Exchange orders')])
       .then(function (r) {
-        RECIPES = r[20] || [];
+        RECIPES = r[20] || []; EXROWS = r[24] || []; EXORD = r[25] || [];
         S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
         STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
         drawHero(); drawStock(r[1]); drawOrders(r[2]); drawVitals(); drawWorks(r[3]);
-        drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawReport(r[21], r[22], r[23], r[19], r[8]);
+        drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawReport(r[21], r[22], r[23], r[19], r[8]); drawExchange();
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
         reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]); drawEvents(r[19]);
@@ -1276,7 +1403,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
       document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', x === t); });
-      ['overview', 'plan', 'write', 'ask', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
+      ['overview', 'plan', 'write', 'exchange', 'ask', 'realm', 'forces', 'diplomacy', 'state', 'statement'].forEach(function (p) { $('#p-' + p).hidden = p !== t.dataset.p; });
       history.replaceState(null, '', location.origin + location.pathname + location.search + (t.dataset.p === 'overview' ? '' : '#' + t.dataset.p));
     };
   });

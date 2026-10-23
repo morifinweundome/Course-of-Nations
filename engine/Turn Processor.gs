@@ -108,7 +108,11 @@ var TURN_CONFIG = {
     // Hidden buildings a nation has unlocked (by discovery, ruling or licence). Only that nation may build them.
     'Unlocks': ['Nation', 'Building', 'Industry', 'Strategic', 'Requires', 'Takes a slot', 'Turns', 'Strain', 'Effect', 'Unlocked (turn)', 'Shown to player'],
     // Recipes each nation holds (advanced materials). A Synthesis Works makes one of them.
-    'Recipes': ['Nation', 'Recipe', 'Yields', 'Inputs', 'Variant', 'Effect', 'Learned (turn)', 'How learned', 'Shown to player']
+    'Recipes': ['Nation', 'Recipe', 'Yields', 'Inputs', 'Variant', 'Effect', 'Learned (turn)', 'How learned', 'Shown to player'],
+    // The Galactic Exchange: one row per resource per turn, written at Resolve. Price is the published price for the next turn.
+    'Exchange': ['Turn', 'Resource', 'Base', 'Price', 'Target', 'Demand', 'Supply', 'Depth', 'Inventory', 'Bought by Exchange', 'Sold by Exchange', 'Trades'],
+    // Standing Exchange orders: limit orders left open, and sliced orders.
+    'Exchange orders': ['Order ID', 'Nation', 'Side', 'Resource', 'Remaining', 'Limit', 'Slice', 'Turns left', 'Placed (turn)', 'Action row', 'Status', 'Note']
   },
 
   // Columns the script may write, by header text. '*' = any column.
@@ -123,8 +127,12 @@ var TURN_CONFIG = {
     'Nations': ['Status', 'Government', 'Order–Liberty', 'Sacred–Secular', 'Martial–Pacific', 'Outward–Inward',
                 'Civic 1', 'Civic 2', 'Civic 3', 'Civic 4', 'Military tier', 'Industry tier', 'Society tier', 'Logistics tier'],
     'Turn log': '*', 'Rulings': '*', 'Run log': '*', 'Works in progress': '*', 'Control': '*', 'Preview': '*',
-    'Standing effects': '*', 'Settlement policy': '*', 'Successions': '*'
+    'Standing effects': '*', 'Settlement policy': '*', 'Successions': '*', 'Exchange': '*', 'Exchange orders': '*'
   },
+  // The Galactic Exchange (rules, The Treasury). Marks are the Ledger resource below.
+  MARKS: 'Stellar Marks',
+  EXCHANGE: { s: 0.5, spread: 0.1, e: 0.5, smooth: 0.1, floor: 0.25, ceiling: 5, hoard: 0.4, kMain: 2, kStrat: 12,
+    depthMinMain: 10, depthMinStrat: 5, capShare: 0.25, glut: 2, base: { Industry: 1, Energy: 1, Research: 2, Influence: 1 }, baseStrat: 10 },
 
   RESOURCES: ['Industry', 'Energy', 'Research', 'Influence'],
   STRATEGIC: ['Adamant ore', 'Lattice crystals', 'Antimatter', 'Volatile isotopes', 'Living compounds', 'Void matter'],
@@ -134,7 +142,7 @@ var TURN_CONFIG = {
   FISCAL_PCT_HEADERS: { Industry: 'Fiscal Industry %', Energy: 'Fiscal Energy %', Research: 'Fiscal Research %', Influence: 'Fiscal Influence %' },
 
   VERBS: ['DEVELOP', 'DESIGNATE', 'BUILD', 'SHIP', 'GROUND', 'DEFENCE', 'RESEARCH', 'COLONIZE', 'CONTACT', 'MOVE',
-          'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK'],
+          'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL'],
   VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE' },
 
   // Rules: Development to level N costs 3 x N Industry.
@@ -739,6 +747,8 @@ function tpEvaluateBody_(world, sim, verb, body, o, phase) {
     case 'REFORM': return tpEvReform_(world, sim, args);
     case 'TRANSFER': return tpEvTransfer_(world, sim, args);
     case 'STABILITY': return tpEvStability_(world, sim, args);
+    case 'BUY': case 'SELL': return tpEvExchange_(world, sim, verb, args);
+    case 'CANCEL': return tpEvCancel_(world, sim, args);
     case 'CONTACT': return tpEvContact_(world, sim, args);
     case 'FATE': return tpRuling_('Fate of a conquered system', 'Fates follow a peace treaty and the GM\'s ruling on its terms', 'Apply the fate chosen per The Fate Of The Conquered.');
     case 'BURN': var e = tpRuling_('Burning archives', 'Only before a peace treaty cedes the system', 'If a cession is pending: -1 Stability, Absorb unavailable.'); e.stab = 1; e.spec = { type: 'STAB_ONLY' }; return e;
@@ -898,11 +908,17 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted) {
   if (r.unknown) return tpRuling_('Requirement the script cannot read: ' + r.unknown, 'Unreadable requirement in Tables', 'Check the requirement.');
   var free = tpNum_(sys.get('Slots')) - tpNum_(sys.get('Slots used')) - (sim.slotsAdded[sys.id] || 0);
   if (b.slot !== false && free < 1) return tpReject_('No free building slot in ' + tpSysLabel_(sys));
+  if (b.orbital) {
+    // Orbital slots (ruling, 23 Oct 2026): one per system, plus one at Development 4.
+    var oSlots = 1 + (tpNum_(sys.get('Development')) >= 4 ? 1 : 0);
+    var oUsed = existing.filter(function (x) { return tpIsOrbital_(world, x); }).length;
+    if (oUsed >= oSlots) return tpReject_('No free orbital slot in ' + tpSysLabel_(sys) + ' (' + oUsed + ' of ' + oSlots + ' used; one more opens at Development 4)');
+  }
   var ex = sim.calc['Extractor cost (Industry)'];
   var industry = b.name === 'Extractor' && ex !== '' && ex !== undefined && ex !== null ? tpNum_(ex) : b.industry;
   var notes = [];
   if (b.oncePerNation && sim.nationHasBuilding(b.name)) notes.push('counts once per nation: no further effect');
-  if (b.orbital) notes.push('orbital: takes no planetary slot');
+  if (b.orbital) notes.push('orbital: takes an orbital slot, not a building slot');
   var built = isExtractor ? 'Extractor (' + plan.deposit + ')' : (b.builtName || b.name);
   if (plan && plan.note) notes.push(plan.note);
   var turns = b.turns || 1;
@@ -1327,6 +1343,61 @@ function tpEvContact_(world, sim, args) {
     { details: (strat || '?') + (sys ? ' at ' + tpSysLabel_(sys) : ''), cost: cost, strat: {}, stab: 0, spec: { type: 'CHARGE_ONLY' } });
 }
 
+// ---------- BUY / SELL <qty> <resource> [AT <price> OR LESS|MORE] [OVER <n> TURNS] [FOR <n> TURNS] ----------
+function tpParseExchange_(verb, args) {
+  var t = String(args).replace(/\s+/g, ' ').trim();
+  var m = t.match(/^(\d+(?:\.\d+)?)\s+(.+?)(?:\s+AT\s+(\d+(?:\.\d+)?)(?:\s*(?:Marks?|SM))?(?:\s+OR\s+(?:MORE|LESS|BETTER))?)?(?:\s+OVER\s+(\d+)\s+TURNS?)?(?:\s+FOR\s+(\d+)\s+TURNS?)?\.?$/i);
+  if (!m) return null;
+  var name = m[2].trim(), all = TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC);
+  var res = all.filter(function (r) { return tpNorm_(r) === tpNorm_(name) || tpNorm_(r).replace(/s$/, '') === tpNorm_(name).replace(/s$/, ''); })[0];
+  return { side: verb, qty: Math.floor(Number(m[1])), res: res || '', name: name, limit: m[3] ? Number(m[3]) : 0, over: m[4] ? Number(m[4]) : 1, stand: m[5] ? Number(m[5]) : 0 };
+}
+function tpEvExchange_(world, sim, verb, args) {
+  var o = tpParseExchange_(verb, args);
+  if (!o) return tpRuling_('Exchange order not understood', 'Write ' + verb + ' <quantity> <resource> [AT <price> OR ' + (verb === 'SELL' ? 'MORE' : 'LESS') + '] [OVER <n> TURNS]', 'Read the order and settle it by hand.');
+  if (!o.res) return tpReject_('The Exchange does not trade "' + o.name + '"');
+  if (o.qty < 1) return tpReject_('Quantity must be at least 1');
+  if (o.over > 1 && o.limit) return tpReject_('An order may be limited or sliced, not both');
+  var st = world.exchangeState(), x = st[o.res], C = TURN_CONFIG.EXCHANGE;
+  var first = Math.ceil(o.qty / o.over);
+  var q = Math.min(first, x.depth);
+  var fill = tpExFill_(x, verb, q);
+  var est = tpRound1_(fill.value);
+  var M = TURN_CONFIG.MARKS, cost = {}, strat = {};
+  var isStrat = TURN_CONFIG.STRATEGIC.indexOf(o.res) >= 0;
+  if (verb === 'SELL') {
+    if (isStrat) strat[o.res] = first; else cost[o.res] = first;
+    cost[M] = -est;
+  } else {
+    if (isStrat) strat[o.res] = -first; else cost[o.res] = -first;
+    cost[M] = est;
+  }
+  var desc = verb + ' ' + o.qty + ' ' + o.res + (o.limit ? ' at ' + o.limit + ' or ' + (verb === 'SELL' ? 'more' : 'less') : '') + (o.over > 1 ? ' over ' + o.over + ' turns' : '') + (o.stand ? ', standing ' + o.stand + ' turns' : '');
+  var notes = ['price ' + tpRound2_(x.price) + ' (' + (verb === 'SELL' ? 'Exchange buys at ' : 'Exchange sells at ') + tpRound2_(x.price * (1 + (verb === 'SELL' ? -C.spread : C.spread))) + ')',
+    'depth ' + x.depth, (verb === 'BUY' ? 'inventory ' + x.inventory : ''), 'estimate ' + est + ' Marks for ' + q + ' this turn', 'settles in the Exchange phase at that moment\'s price'];
+  if (first > x.depth) notes.push('more than one depth: only ' + x.depth + ' can trade this turn');
+  if (verb === 'BUY' && x.inventory < 1) notes.push('the Exchange holds none: the order fills only if others sell first');
+  return tpReady_(desc, notes.filter(String).join('; '), cost, strat, { type: 'EXCHANGE', side: verb, res: o.res, qty: o.qty, limit: o.limit, over: o.over, stand: o.stand });
+}
+function tpEvCancel_(world, sim, args) {
+  var m = String(args).match(/^(?:ORDER\s+)?(EX-\d+)/i);
+  if (!m) return tpRuling_('Cancel what?', 'Write CANCEL ORDER EX-<number>', 'Identify the standing order.');
+  var X = world.model.tab('Exchange orders'), hit = null;
+  X.rows().forEach(function (r) { if (String(X.get(r, 'Order ID')).toUpperCase() === m[1].toUpperCase() && X.get(r, 'Nation') === sim.nid && X.get(r, 'Status') === 'Open') hit = r; });
+  if (hit === null) return tpReject_('No open order ' + m[1].toUpperCase() + ' of this nation');
+  return tpReady_('Cancel ' + m[1].toUpperCase(), 'Withdrawn before this turn\'s trading', {}, {}, { type: 'EXCANCEL', id: m[1].toUpperCase() });
+}
+/** Fill for q units at the current state: value in Marks, average price, and the price after. */
+function tpExFill_(x, side, q) {
+  var C = TURN_CONFIG.EXCHANGE, D = Math.max(1, x.depth);
+  if (side === 'SELL') {
+    var pb = x.price * (1 - C.spread), avg = pb * (1 - C.s * q / (2 * D));
+    return { value: q * avg, avg: avg, after: Math.max(x.base * C.floor, x.price * (1 - C.s * q / D)) };
+  }
+  var ps = x.price * (1 + C.spread), avg2 = ps * (1 + C.s * q / (2 * D));
+  return { value: q * avg2, avg: avg2, after: Math.min(x.base * C.ceiling, x.price * (1 + C.s * q / D)) };
+}
+
 // ---------- shared checks ----------
 function tpAffordable_(sim, ev) {
   var short = [];
@@ -1451,6 +1522,7 @@ tpResolver_.prototype.run = function (dry) {
   this.phaseUpkeep();
   this.phaseStandingEffects();
   this.phaseSynthesis();
+  this.phaseExchange();
   this.phaseSpending();
   this.phaseMovement();
   this.phasePopulation();
@@ -1708,7 +1780,7 @@ tpResolver_.prototype.payDebts = function (n) {
 tpResolver_.prototype.phaseSpending = function () {
   var self = this;
   this.actions.forEach(function (a) {
-    if (a.verb === 'TRANSFER' || a.verb === 'MOVE') return;
+    if (a.verb === 'TRANSFER' || a.verb === 'MOVE' || a.verb === 'BUY' || a.verb === 'SELL' || a.verb === 'CANCEL') return;
     if (a.verb === 'COVERT') {
       var d = self.decisions['A' + a.actionNo];
       if (d && d.kind !== 'open') { self.A.set(a.row, 'GM ruling', d.decision || 'Settled'); self.setStatus(a, 'Settled by GM'); self.settleRuling(d); }
@@ -1964,6 +2036,107 @@ tpResolver_.prototype.phaseSynthesis = function () {
   });
 };
 
+// ---------------- The Galactic Exchange (after Income, before Spending) ----------------
+tpResolver_.prototype.phaseExchange = function () {
+  var self = this, w = this.world, turn = this.turn, C = TURN_CONFIG.EXCHANGE, M = TURN_CONFIG.MARKS;
+  var st = w.exchangeState(), X = this.model.tab('Exchange orders');
+  var opening = {}; Object.keys(st).forEach(function (r) { opening[r] = st[r].price; });
+  var bought = {}, sold = {}, trades = {}, tradedBy = {}, boughtBy = {};
+  Object.keys(st).forEach(function (r) { bought[r] = 0; sold[r] = 0; trades[r] = 0; });
+  var nextId = 1;
+  X.rows().forEach(function (r) { var m = String(X.get(r, 'Order ID')).match(/EX-(\d+)/); if (m) nextId = Math.max(nextId, Number(m[1]) + 1); });
+  // 1. Cancellations, then this turn's new orders.
+  var queue = [];
+  this.actions.forEach(function (a) {
+    if (a.verb !== 'BUY' && a.verb !== 'SELL' && a.verb !== 'CANCEL') return;
+    if (self.gate(a) !== 'go') return;
+    var ev = self.reevaluate(a);
+    if (ev.status !== 'Ready' || !ev.spec) { self.setStatus(a, ev.status === 'Rejected' ? 'Failed' : 'Not applied', ev.flag); return; }
+    if (ev.spec.type === 'EXCANCEL') {
+      X.rows().forEach(function (r) { if (String(X.get(r, 'Order ID')).toUpperCase() === ev.spec.id && X.get(r, 'Nation') === a.nation && X.get(r, 'Status') === 'Open') { X.set(r, 'Status', 'Cancelled'); X.set(r, 'Note', 'Cancelled by order, turn ' + turn); } });
+      self.setStatus(a, 'Applied'); self.stats.applied++; return;
+    }
+    var sp = ev.spec, slice = Math.ceil(sp.qty / sp.over);
+    queue.push({ a: a, nation: a.nation, side: sp.side, res: sp.res, want: Math.min(slice, sp.qty), total: sp.qty, limit: sp.limit, over: sp.over, stand: sp.stand, row: a.actionNo });
+  });
+  X.rows().forEach(function (r) {
+    if (X.get(r, 'Status') !== 'Open' || tpNum_(X.get(r, 'Placed (turn)')) >= turn) return;
+    var rem = tpNum_(X.get(r, 'Remaining')), slice = tpNum_(X.get(r, 'Slice')) || rem;
+    queue.push({ standing: r, nation: X.get(r, 'Nation'), side: X.get(r, 'Side'), res: X.get(r, 'Resource'), want: Math.min(slice, rem), total: rem, limit: tpNum_(X.get(r, 'Limit')), id: X.get(r, 'Order ID'), row: X.get(r, 'Action row') });
+  });
+  // 2. Random order within the turn (seeded by the turn, so a rerun gives the same order).
+  var seed = turn * 2654435761 % 4294967296;
+  var rnd = function () { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  for (var i = queue.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)); var tmp = queue[i]; queue[i] = queue[j]; queue[j] = tmp; }
+  // 3. Settle.
+  queue.forEach(function (o) {
+    var x = st[o.res]; if (!x) return;
+    var D = Math.max(1, x.depth), key = o.nation + '|' + o.res, used = tradedBy[key] || 0, q = Math.min(o.want, D - used), why = [];
+    if (q < o.want) why.push('turn limit of one depth (' + D + ')');
+    if (o.side === 'SELL') {
+      var have = Math.floor(w.stock(o.nation, o.res) + 1e-9);
+      if (have < q) { q = have; why.push('only ' + have + ' held'); }
+      var glutAt = (o.res === 'Energy' || o.res === 'Influence') ? 0.5 : 1;
+      if (x.price < glutAt * x.base) { var room = Math.max(0, Math.floor(C.glut * D - x.inventory)); if (room < q) { q = room; why.push('glut brake: the Exchange is full'); } }
+      if (o.limit) { var pb = x.price * (1 - C.spread); var lim = pb > o.limit ? Math.floor(2 * D * (1 - o.limit / pb) / C.s) : 0; if (lim < q) { q = Math.max(0, lim); why.push('limit ' + o.limit); } }
+    } else {
+      if (x.inventory < q) { q = Math.floor(x.inventory + 1e-9); why.push('the Exchange held ' + Math.floor(x.inventory)); }
+      if (o.res === 'Research' || o.res === 'Influence') {
+        var gross = tpNum_((w.calc(o.nation) || {})[TURN_CONFIG.GROSS_HEADERS[o.res]]), cap = Math.floor(C.capShare * gross) - (boughtBy[key] || 0);
+        if (cap < q) { q = Math.max(0, cap); why.push('purchase cap of 25% of gross ' + o.res); }
+      }
+      if (o.limit) { var ps = x.price * (1 + C.spread); var lim2 = o.limit > ps ? Math.floor(2 * D * (o.limit / ps - 1) / C.s) : 0; if (lim2 < q) { q = Math.max(0, lim2); why.push('limit ' + o.limit); } }
+      var marks = w.stock(o.nation, M);
+      while (q > 0 && tpExFill_(x, 'BUY', q).value > marks + 1e-9) q--;
+      if (q < o.want && marks < tpExFill_(x, 'BUY', Math.max(1, o.want)).value) why.push(tpRound1_(marks) + ' Marks in the treasury');
+    }
+    var filled = 0, value = 0;
+    if (q > 0) {
+      var f = tpExFill_(x, o.side, q);
+      value = tpRound2_(f.value); filled = q;
+      var reason = 'Exchange: ' + (o.side === 'SELL' ? 'sold ' : 'bought ') + q + ' ' + o.res + ' at ' + tpRound2_(f.avg) + ' Marks each';
+      var working = 'price ' + tpRound2_(x.price) + ' -> ' + tpRound2_(f.after) + '; depth ' + D + (o.id ? '; standing order ' + o.id : '');
+      if (o.side === 'SELL') { self.ledger('Exchange', o.nation, o.res, -q, reason, working, o.row); self.ledger('Exchange', o.nation, M, value, reason, working, o.row); x.inventory += q; bought[o.res] += q; }
+      else { self.ledger('Exchange', o.nation, o.res, q, reason, working, o.row); self.ledger('Exchange', o.nation, M, -value, reason, working, o.row); x.inventory -= q; sold[o.res] += q; boughtBy[key] = (boughtBy[key] || 0) + q; }
+      x.price = f.after; trades[o.res]++; tradedBy[key] = used + q;
+    }
+    var left = o.total - filled;
+    var note = filled ? (o.side === 'SELL' ? 'Sold ' : 'Bought ') + filled + ' ' + o.res + ' for ' + tpRound1_(value) + ' Marks' : 'Nothing traded';
+    if (why.length) note += ' (' + why.join('; ') + ')';
+    if (o.a) {
+      // A sliced order or a limit order with FOR n TURNS leaves the rest standing.
+      var turnsLeft = o.over > 1 ? o.over - 1 : o.stand > 1 ? o.stand - 1 : 0;
+      if (left > 0 && turnsLeft > 0) {
+        var id = 'EX-' + (nextId++);
+        X.add('Order ID', { 'Order ID': id, 'Nation': o.nation, 'Side': o.side, 'Resource': o.res, 'Remaining': left, 'Limit': o.limit || '',
+          'Slice': o.over > 1 ? Math.ceil(o.total / o.over) : '', 'Turns left': turnsLeft, 'Placed (turn)': turn, 'Action row': o.row, 'Status': 'Open', 'Note': note });
+        note += '; ' + left + ' left standing as ' + id;
+      }
+      self.A.set(o.a.row, 'Ledger lines', ''); self.setStatus(o.a, 'Applied', note); self.stats.applied++;
+    } else {
+      var tl = tpNum_(X.get(o.standing, 'Turns left')) - 1;
+      X.set(o.standing, 'Remaining', left); X.set(o.standing, 'Turns left', Math.max(0, tl)); X.set(o.standing, 'Note', 'Turn ' + turn + ': ' + note);
+      if (left <= 0) X.set(o.standing, 'Status', 'Filled'); else if (tl <= 0) X.set(o.standing, 'Status', 'Lapsed');
+    }
+  });
+  // 4. Next turn's published prices.
+  var EX = this.model.tab('Exchange');
+  Object.keys(st).forEach(function (res) {
+    var x = st[res], fl = w.exFlows(res, turn), strat = TURN_CONFIG.STRATEGIC.indexOf(res) >= 0;
+    var openBuys = 0;
+    X.rows().forEach(function (r) { if (X.get(r, 'Status') === 'Open' && X.get(r, 'Side') === 'BUY' && X.get(r, 'Resource') === res) openBuys += tpNum_(X.get(r, 'Remaining')); });
+    var demand = fl.spent + openBuys, supply = fl.income + x.inventory + 0.1 * fl.stock, k = strat ? C.kStrat : C.kMain;
+    var target = demand <= 0 && supply <= 0 ? x.base : supply > 0 ? x.base * Math.pow(Math.max(demand, 0.01) / (supply / k), C.e) : x.base * C.ceiling;
+    target = Math.max(x.base * C.floor, Math.min(x.base * C.ceiling, target));
+    // Trades walk the price within the turn only; the published price moves at most 10% a turn toward its target.
+    var p0 = opening[res], step = Math.max(-C.smooth * p0, Math.min(C.smooth * p0, target - p0));
+    var price = Math.max(x.base * C.floor, Math.min(x.base * C.ceiling, p0 + step));
+    var depth = Math.round(Math.max(fl.traded + (bought[res] + sold[res]) / 3, 0.1 * fl.income, strat ? C.depthMinStrat : C.depthMinMain));
+    EX.add('Turn', { 'Turn': turn, 'Resource': res, 'Base': x.base, 'Price': tpRound2_(price), 'Target': tpRound2_(target), 'Demand': tpRound1_(demand),
+      'Supply': tpRound1_(supply), 'Depth': depth, 'Inventory': tpRound1_(x.inventory), 'Bought by Exchange': bought[res], 'Sold by Exchange': sold[res], 'Trades': trades[res] });
+  });
+};
+
 // ---------------- Settlement within a nation ----------------
 tpResolver_.prototype.phaseSettlement = function () {
   var self = this, w = this.world, Wt = w.worldsTab, P = this.model.tab('Settlement policy');
@@ -2216,6 +2389,60 @@ tpWorld_.prototype.building = function (name) {
   var key = tpNorm_(name);
   return this.tables.build[key] || this.tables.build[key.replace(/s$/, '')] || null;
 };
+/** The Exchange as it stands for this turn: the latest published row per resource, or base prices if none. */
+tpWorld_.prototype.exchangeState = function () {
+  if (this._ex) return this._ex;
+  var C = TURN_CONFIG.EXCHANGE, X = this.model.tab('Exchange'), latest = {}, self = this;
+  X.rows().forEach(function (r) {
+    var res = String(X.get(r, 'Resource')).trim(), t = tpNum_(X.get(r, 'Turn'));
+    if (res && (!latest[res] || t >= latest[res].t)) latest[res] = { t: t, r: r };
+  });
+  var out = {};
+  TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC).forEach(function (res) {
+    var base = C.base[res] || C.baseStrat, L = latest[res];
+    out[res] = L ? { res: res, base: base, price: tpNum_(X.get(L.r, 'Price')) || base, depth: tpNum_(X.get(L.r, 'Depth')) || self.exDepthFloor(res), inventory: tpNum_(X.get(L.r, 'Inventory')) }
+                 : { res: res, base: base, price: base, depth: self.exDepthFloor(res), inventory: 0 };
+  });
+  this._ex = out;
+  return out;
+};
+tpWorld_.prototype.exDepthFloor = function (res) {
+  var C = TURN_CONFIG.EXCHANGE, strat = TURN_CONFIG.STRATEGIC.indexOf(res) >= 0;
+  return Math.max(strat ? C.depthMinStrat : C.depthMinMain, Math.round(0.1 * this.exFlows(res).income));
+};
+/** Galaxy-wide flows of a resource, averaged over the last 3 turns of the Ledger (Exchange trades left out). */
+tpWorld_.prototype.exFlows = function (res, uptoTurn) {
+  this._flows = this._flows || {};
+  var key = res + '|' + (uptoTurn || '');
+  if (this._flows[key]) return this._flows[key];
+  var L = this.ledgerTab, last = 0, nat = {};
+  this.nations.forEach(function (n) { nat[n.id] = true; });
+  L.rows().forEach(function (r) { var t = tpNum_(L.get(r, 'Turn')); if (t > last && (!uptoTurn || t <= uptoTurn)) last = t; });
+  var inc = 0, spent = 0, traded = 0, stocks = {};
+  L.rows().forEach(function (r) {
+    if (L.get(r, 'Resource') !== res || !nat[L.get(r, 'Nation')]) return;
+    var t = tpNum_(L.get(r, 'Turn')), a = tpNum_(L.get(r, 'Amount')), ph = String(L.get(r, 'Phase'));
+    if (uptoTurn && t > uptoTurn) return;
+    stocks[L.get(r, 'Nation')] = (stocks[L.get(r, 'Nation')] || 0) + a;
+    if (t <= last - 3) return;
+    if (ph === 'Exchange') { traded += Math.abs(a); return; }
+    if (ph === 'Income' && a > 0) inc += a;
+    else if (a < 0 && (ph === 'Spending' || ph === 'Upkeep')) spent += -a;
+  });
+  var total = 0; Object.keys(stocks).forEach(function (k) { total += Math.max(0, stocks[k]); });
+  var counted = 0; Object.keys(stocks).forEach(function (k) { counted += Math.min(Math.max(0, stocks[k]), TURN_CONFIG.EXCHANGE.hoard * total); });
+  var out = { income: inc / 3, spent: spent / 3, traded: traded / 3, stock: counted };
+  this._flows[key] = out;
+  return out;
+};
+function tpIsOrbital_(world, name) {
+  var base = String(name).replace(/\s*\(.*\)\s*$/, '');
+  var b = world.building(base);
+  if (b && b.orbital) return true;
+  var U = world.model.tab('Unlocks'), hit = false;
+  U.rows().forEach(function (r) { if (tpNorm_(U.get(r, 'Building')) === tpNorm_(base) && /orbital/i.test(String(U.get(r, 'Takes a slot')))) hit = true; });
+  return hit;
+}
 // Hidden buildings unlocked for one nation (Unlocks tab). "Synthesis Works (<recipe>)" names the recipe it makes.
 tpWorld_.prototype.unlockedBuilding = function (nid, name) {
   var m = String(name).match(/^(.*?)\s*(?:\(\s*(?:making\s+)?([^)]+?)\s*\)|[\u2014\u2013-]+\s*(?:making\s+)?(.+)|\s+making\s+(.+))$/i);
@@ -2229,7 +2456,8 @@ tpWorld_.prototype.unlockedBuilding = function (nid, name) {
   });
   if (hit === null) return null;
   var b = { name: String(U.get(hit, 'Building')).trim(), industry: tpNum_(U.get(hit, 'Industry')), strat: tpParseStrat_(U.get(hit, 'Strategic')),
-    req: tpParseReq_(U.get(hit, 'Requires')), turns: tpNum_(U.get(hit, 'Turns')) || 1, slot: !/^n/i.test(String(U.get(hit, 'Takes a slot'))), unlocked: true };
+    req: tpParseReq_(U.get(hit, 'Requires')), turns: tpNum_(U.get(hit, 'Turns')) || 1,
+    slot: !/^(n|orbital)/i.test(String(U.get(hit, 'Takes a slot'))), orbital: /orbital/i.test(String(U.get(hit, 'Takes a slot'))), unlocked: true };
   if (/^synthesis works$/i.test(b.name)) {
     if (!recipe) return { error: 'Name the recipe the Works will make, e.g. BUILD Synthesis Works (Reactor Alloy) @ <system>' };
     var rc = this.recipe(nid, recipe);
@@ -2449,12 +2677,12 @@ tpWorld_.prototype.disbandDreadnoughts = function (nid, count) {
 tpWorld_.prototype.newSim = function (n, phase, resolver) {
   var self = this, c = this.calc(n.id) || {};
   var stock;
-  if (phase === 'prepare') stock = this.projectedStock(n.id);
+  if (phase === 'prepare') { stock = this.projectedStock(n.id); stock[TURN_CONFIG.MARKS] = this.stock(n.id, TURN_CONFIG.MARKS); }
   else {
     stock = {};
     var w = this;
     // In resolution the stock is read live from the Ledger as it stands.
-    TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC).forEach(function (r) {
+    TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC, [TURN_CONFIG.MARKS]).forEach(function (r) {
       Object.defineProperty(stock, r, { enumerable: true, configurable: true,
         get: function () { return w.stock(n.id, r) - (sim.pendingSpend[r] || 0); },
         set: function (v) { /* spending is written to the Ledger by the resolver */ } });
