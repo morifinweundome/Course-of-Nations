@@ -738,6 +738,20 @@ function tpEvaluateOrder_(world, sim, o, earlier, phase) {
   return ev;
 }
 
+/** Players often end a line with a remark in parentheses ("COLONIZE C-14 (Rich Toxic, one lane from C-07)").
+ *  The remark is dropped when what is left still names a system (an ID, or @ <place>), so a material or
+ *  environment in parentheses ("Extractor (Void matter) @ C-07") is untouched. Diplomacy and prose verbs keep it. */
+function tpStripRemark_(verb, args) {
+  if (/^(?:TREATY|POLICY|INITIATIVE|STABILITY|COVERT|NOTE|CONTACT)$/.test(verb)) return args;
+  var out = args, prev;
+  do {
+    prev = out;
+    var cut = out.replace(/\s*\([^()]*\)\s*\.?\s*$/, '');
+    if (cut !== out && cut && (/@/.test(cut) || /\b(?:[IVX]+|C)-\d{1,2}\b/.test(cut))) out = cut;
+  } while (out !== prev);
+  return out;
+}
+
 /** Splits "ORDER IF condition". The rules write the condition after the order, starting with IF. */
 function tpStripCondition_(text) {
   var m = String(text).match(/^(.*?)\s+IF\s+(.+)$/);
@@ -770,6 +784,7 @@ function tpDepResult_(p) {
 
 function tpEvaluateBody_(world, sim, verb, body, o, phase) {
   var args = body.replace(/^\S+\s*/, '').trim();
+  args = tpStripRemark_(verb, args);
   switch (verb) {
     case 'DEVELOP': return tpEvDevelop_(world, sim, args);
     case 'DESIGNATE': return tpEvDesignate_(world, sim, args);
@@ -1049,6 +1064,7 @@ function tpEvGround_(world, sim, args) {
 // ---------- DEFENCE [Static Defence] <points> @ <system>  |  DEFENCE <installation> @ <system> ----------
 function tpEvDefence_(world, sim, args) {
   var p = tpSplitAt_(args);
+  if (!p) { var dm = String(args).match(/^\s*(\S+)\s+(\d+)\s*$/); if (dm && world.findSystem(dm[1])) p = { what: dm[2], where: dm[1] }; }
   if (!p) return tpRuling_('No system given (write DEFENCE <points> @ <system>)', 'The system is missing', 'Identify the system.');
   var inst = tpFindKey_(TURN_CONFIG.RULE_BUILDINGS, p.what.replace(/^(?:an?|the)\s+/i, ''));
   if (inst && TURN_CONFIG.RULE_BUILDINGS[inst].installation) {
@@ -1144,6 +1160,7 @@ function tpEvMove_(world, sim, args, phase) {
     if (!m2) return tpRuling_('Route not readable (write MOVE <force>: <from> > <to>)', 'No destination found', 'Identify the move.');
     forceText = m2[1]; route = '> ' + m2[2];
   }
+  route = route.replace(/\s*[;,].*$/, '').replace(/\s*\([^()]*\)\s*$/, '');
   var f = world.findForce(sim.nid, forceText);
   if (!f) return tpRuling_('Force not found: "' + forceText + '"', 'No force of this nation by that name or ID', 'Identify the force.');
   if (sim.moved[f.row]) return tpReject_('This force already moves this turn');
@@ -3069,7 +3086,10 @@ tpWorld_.prototype.contacts = function () {
   var E = tpTryTab_(this.model, 'Events');
   if (E) E.rows().forEach(function (r) {
     if (tpNorm_(E.get(r, 'Kind')) !== 'first contact') return;
-    pairAll(self.nationIds(E.get(r, 'Nations')), 'Events: First contact, Turn ' + E.get(r, 'Turn'), tpNum_(E.get(r, 'Turn')));
+    // One row per side ("KRT", "First contact with Saint Oren"): the other nation is named in the title.
+    var ids = self.nationIds(E.get(r, 'Nations')).concat(self.nationMentions(String(E.get(r, 'Title') || '') + ' ' + String(E.get(r, 'Text') || '')))
+      .filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    pairAll(ids, 'Events: First contact, Turn ' + E.get(r, 'Turn'), tpNum_(E.get(r, 'Turn')));
   });
   this._contacts = out;
   return out;
@@ -3167,8 +3187,17 @@ tpWorld_.prototype.forceList = function () {
   return out;
 };
 tpWorld_.prototype.findForce = function (nid, text) {
-  var t = tpNorm_(text);
-  return this.forceList().filter(function (f) { return f.owner === nid && (tpNorm_(f.id) === t || tpNorm_(f.name) === t); })[0] || null;
+  var mine = this.forceList().filter(function (f) { return f.owner === nid; });
+  function match(t) { t = tpNorm_(t); return t ? mine.filter(function (f) { return tpNorm_(f.id) === t || tpNorm_(f.name) === t; })[0] : null; }
+  var hit = match(text);
+  if (hit) return hit;
+  // "KRT-F4 (New squadron, 25 Escorts)" or "Home Fleet (10 Escorts)": the ID at the front, or the name before the remark.
+  var raw = String(text || '');
+  var id = raw.match(/^\s*([A-Z]{2,4}-[A-Z]\d+)\b/);
+  if (id && (hit = match(id[1]))) return hit;
+  var bare = raw.replace(/\s*\(.*$/, '').trim();
+  if (bare !== raw.trim() && (hit = match(bare))) return hit;
+  return null;
 };
 tpWorld_.prototype.forceById = function (id) { return this.forceList().filter(function (f) { return f.id === id; })[0]; };
 tpWorld_.prototype.foreignForcesAt = function (nid, sid) {
