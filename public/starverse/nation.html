@@ -590,12 +590,25 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         var t = BK.reach.filter(function (x) { return x['System ID'] === r.sys; })[0];
         if (!t) { bad('Choose a target.'); break; }
         out.text = 'COLONIZE ' + t['System ID'];
+        // A colony founded earlier in the same turn counts as held (rules, Colonization): an expedition target may be in direct reach of one.
+        var via = '';
+        if (/^Expedition/.test(t['Colonize'] || '')) {
+          var lanes = LANES;
+          var lim = num(kv('Colonize within lanes')) || 1;
+          rows.slice(0, i).forEach(function (x) {
+            if (via || x.verb !== 'COLONIZE' || !x.sys) return;
+            var d = {}; d[x.sys] = 0; var q = [x.sys];
+            while (q.length) { var y = q.shift(); if (d[y] >= lim) continue; (lanes[y] || []).forEach(function (z) { if (d[z] == null) { d[z] = d[y] + 1; q.push(z); } }); }
+            if (d[t['System ID']] != null) via = x.sys;
+          });
+        }
+        var kind = via ? 'Direct, from your new colony at ' + via + ' (founded earlier in these orders)' : t['Colonize'];
         var c = BK.prices.filter(function (x) { return x['Group'] === 'Colonies'; })[0] || { Energy: 5, Influence: 5 };
         out.cost.Energy = num(c['Energy']); out.cost.Influence = num(c['Influence']);
         if (others.some(function (x) { return x.verb === 'COLONIZE' && x.sys === r.sys; })) bad('Already in your basket.');
         else if (num(kv('Stability')) <= 3) bad('A nation in Unrest or worse may not colonize this turn.');
-        else if (t['Charted'] === 'No') { out.msg = 'Uncharted: its world, life and deposits are unknown until the colony lands; if another power already holds it, the order fails. ' + (/^Expedition/.test(t['Colonize']) ? 'Beyond direct reach: an expedition at the colony\'s cost, travelling at your jump range.' : 'Within direct reach.') + ' 0.3 bn settlers leave your worlds.'; out.cls = 'wait'; }
-        else { out.msg = (t['Class'] || '') + ' ' + (t['Environment'] || '') + (t['Deposits'] ? ' · ' + t['Deposits'] : '') + ' · ' + (t['Colonize'] || '') + ' · 0.3 bn settlers leave your worlds'; out.cls = 'ok'; }
+        else if (t['Charted'] === 'No') { out.msg = 'Uncharted: its world, life and deposits are unknown until the colony lands; if another power already holds it, the order fails. ' + (/^Expedition/.test(kind) ? 'Beyond direct reach: an expedition at the colony\'s cost, travelling at your jump range.' : kind.replace(' (uncharted)', '') + '.') + ' 0.3 bn settlers leave your worlds.'; out.cls = 'wait'; }
+        else { out.msg = (t['Class'] || '') + ' ' + (t['Environment'] || '') + (t['Deposits'] ? ' · ' + t['Deposits'] : '') + ' · ' + (kind || '') + ' · 0.3 bn settlers leave your worlds'; out.cls = 'ok'; }
         break;
       }
       case 'SHIP': case 'GROUND': {
@@ -1199,7 +1212,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 
   /* ---------- decision aids ---------- */
-  var STOCK = {}, RECIPES = [], EXROWS = [], EXORD = [];
+  var STOCK = {}, RECIPES = [], EXROWS = [], EXORD = [], LANES = {};
+  // The lane network, for colonies chained within one turn's orders (read once from the game's chart).
+  fetch(API + '/chart', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (v) {
+    if (!v || !v.ok || !v.lanes) return;
+    var h = v.lanes[0] || [], fi = h.indexOf('From'), ti = h.indexOf('To');
+    v.lanes.slice(1).forEach(function (l) { var a = l[fi], b = l[ti]; if (!a || !b) return; (LANES[a] = LANES[a] || []).push(b); (LANES[b] = LANES[b] || []).push(a); });
+    if (BK.draft) drawBasket();
+  }).catch(function () {});
   function stratParse(t) { var o = {}; String(t || '').split(/\s*[;,]\s*/).forEach(function (p) { var m = p.match(/^([\d.]+)\s+(.+)$/); if (m) o[m[2]] = (o[m[2]] || 0) + num(m[1]); }); return o; }
 
   function drawSince(hist) {
