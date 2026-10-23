@@ -155,6 +155,7 @@ function pfShare_(id) {
 /** Strips the GM's working (seeds, ruling references, hand-application notes) from a log line. */
 function pfClean_(t) {
   return String(t || '')
+    .replace(/^Recorded on the player's word:\s*/i, '')
     .replace(/\s*\([^()]*(seed|Rulings row|GM ruling|GM Reference|applied by hand)[^()]*\)/gi, '')
     .replace(/\s*Applied by hand[^.]*\.?/gi, '')
     .replace(/\s+([.,;])/g, '$1').trim();
@@ -492,8 +493,9 @@ function pfExtras_(W, n, rec, ss) {
   W.turnlog.forEach(function (l) {
     var k = AUTO[l.get('Event')];
     if (!k || l.get('Public') !== 'Yes' || names(l.get('Nations')).indexOf(id) < 0) return;
-    var d = pfClean_(l.get('Description')), m = d.match(/^(.{12,140}?[.:])\s+(.*)$/);
-    E.push([l.get('Turn'), k, m ? m[1].replace(/[.:]$/, '') : d, m ? m[2] : '']);
+    var TITLE = { 'Native world joined': 'A native world joins', 'Treaty': 'Treaty signed', 'Trade': 'Trade concluded', 'Battle': 'Battle', 'Ground battle': 'Ground battle',
+      'Breakaway': 'A world breaks away', 'Revolt': 'Revolt', 'Succession': 'Succession' };
+    E.push([l.get('Turn'), k, TITLE[l.get('Event')] || l.get('Event'), pfClean_(l.get('Description'))]);
   });
   E = [E[0]].concat(E.slice(1).sort(function (a, b) { return Number(b[0]) - Number(a[0]); }).slice(0, 120));
   rec.Events = E;
