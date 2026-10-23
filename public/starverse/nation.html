@@ -129,6 +129,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .evc .h{font-weight:700;color:var(--bright);margin:3px 0 2px}
 .evc .b{font-size:14px;color:var(--text);white-space:pre-line}
 .evc.gold{border-left-color:var(--gold)}.evc.up{border-left-color:var(--up)}.evc.down{border-left-color:var(--down)}.evc.muted{border-left-color:var(--line)}
+.rp-turns{display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 16px}
+.rp-turns button{font:inherit;font-size:13px;font-weight:700;background:none;border:1px solid var(--line2);color:var(--muted);border-radius:999px;padding:4px 12px;cursor:pointer}
+.rp-turns button[aria-pressed=true]{border-color:var(--gold);color:var(--gold)}
+.rp h3{font-size:13px;color:var(--steel);letter-spacing:.1em;text-transform:uppercase;margin:22px 0 10px}
+.rp .brief{background:linear-gradient(165deg,var(--band2),var(--band1));border:1px solid var(--line2);border-left:3px solid var(--gold);border-radius:12px;padding:14px 18px;margin-bottom:10px}
+.rp .brief .h{font-weight:700;color:var(--bright);margin-bottom:6px}.rp .brief .b{white-space:pre-line;font-size:14.5px;line-height:1.55}
+.rp .oc{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--line2)}
+.rp .oc:last-child{border-bottom:0}.rp .oc .o{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--chrome);word-break:break-word}
+.rp .oc .nt{grid-column:2;font-size:13px;color:var(--muted)}
 .evarc{margin-top:12px}.evarc summary{cursor:pointer;color:var(--chrome);font-weight:700;font-size:14px;padding:6px 0}
 .evarc h3{font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 8px}
 .aff{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
@@ -213,7 +222,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       <button class="tab" role="tab" aria-selected="false" data-p="forces">Forces<span class="n" id="nF"></span></button>
       <button class="tab" role="tab" aria-selected="false" data-p="state">State &amp; fiscal code</button>
       <button class="tab" role="tab" aria-selected="false" data-p="diplomacy">Contacts &amp; treaties<span class="n" id="nD"></span></button>
-      <button class="tab" role="tab" aria-selected="false" data-p="statement">Statement</button>
+      <button class="tab" role="tab" aria-selected="false" data-p="statement">Turn report</button>
     </div>
 
     <section id="p-overview">
@@ -309,9 +318,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
     <section id="p-statement" hidden>
       <div class="group">
-        <h2>Statement</h2>
-        <p class="note">Every change to your stockpiles over the last three turns, newest first.</p>
-        <div id="statement"></div>
+        <h2 id="rpTitle">Turn report</h2>
+        <div class="rp-turns" id="rpTurns"></div>
+        <div id="report"></div>
       </div>
     </section>
     <section id="p-write" hidden>
@@ -1002,7 +1011,54 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#fiscal').innerHTML = table(fiscal, [{ k: 'Instrument', f: function (v) { return '<b>' + esc(v) + '</b>'; } }, { k: 'Intensity' }, { k: 'As written', f: function (v) { return '<span class="muted">' + esc(v) + '</span>'; } }, { k: 'Since turn', n: 1 }], { empty: 'No fiscal code recorded.' });
   }
 
+  var RP = { acc: [], out: [], rep: [], ev: [], st: [], turn: null };
+  function drawReport(acc, out, rep, ev, st) {
+    RP.acc = acc || []; RP.out = out || []; RP.rep = rep || []; RP.ev = ev || []; RP.st = st || [];
+    var turns = {};
+    [RP.acc, RP.out, RP.rep].forEach(function (rows) { rows.forEach(function (r) { if (r['Turn'] !== '') turns[num(r['Turn'])] = 1; }); });
+    var list = Object.keys(turns).map(Number).sort(function (a, b) { return b - a; });
+    if (!list.length) { $('#rpTurns').innerHTML = ''; $('#report').innerHTML = '<div class="none">Your first report appears once a turn has been resolved.</div>'; return; }
+    if (RP.turn == null || list.indexOf(RP.turn) < 0) RP.turn = list[0];
+    $('#rpTurns').innerHTML = list.map(function (t) { return '<button type="button" data-rt="' + t + '" aria-pressed="' + (t === RP.turn) + '">Turn ' + t + '</button>'; }).join('');
+    $('#rpTitle').textContent = 'Turn ' + RP.turn + ' report';
+    var T = function (rows) { return rows.filter(function (r) { return num(r['Turn']) === RP.turn; }); };
+    var h = '<div class="rp">';
+    var briefs = T(RP.rep);
+    if (briefs.length) h += '<h3>From the GM</h3>' + briefs.map(function (r) {
+      return '<div class="brief">' + (r['Heading'] ? '<div class="h">' + esc(r['Heading']) + '</div>' : '') + '<div class="b">' + esc(r['Text']) + '</div></div>';
+    }).join('');
+    var ev = T(RP.ev);
+    if (ev.length) h += '<h3>Events</h3><div class="ev">' + ev.map(function (r) {
+      return '<div class="evc"><div class="k"><span>' + esc(r['Kind'] || 'Notice') + '</span></div><div class="h">' + esc(r['Title']) + '</div>' + (r['Text'] ? '<div class="b">' + esc(r['Text']) + '</div>' : '') + '</div>';
+    }).join('') + '</div>';
+    var oc = T(RP.out), PILL = { 'Carried out': 'ok', 'Refused': 'no', 'Ruled': 'wait' };
+    h += '<h3>Your orders</h3>' + (oc.length ? '<div class="panel">' + oc.map(function (r) {
+      return '<div class="oc"><span class="pill ' + (PILL[r['Outcome']] || '') + '">' + esc(r['Outcome']) + '</span><span class="o">' + esc(r['Order']) +
+        (r['Channel'] && r['Channel'] !== 'Routine' ? ' <span class="muted">(' + esc(r['Channel']) + ')</span>' : '') + '</span>' +
+        (r['Note'] ? '<span class="nt">' + esc(r['Note']) + '</span>' : '') + '</div>';
+    }).join('') + '</div>' : '<div class="none">No orders were on record for this turn.</div>');
+    var ac = T(RP.acc);
+    var sg = function (v) { v = num(v); return v ? fmt(v, true) : '—'; };
+    h += '<h3>Accounts</h3>' + table(ac, [
+      { k: 'Resource', f: function (v) { return ico(v) + esc(v); } },
+      { k: 'Opening', n: 1, f: function (v) { return fmt(num(v)); } },
+      { k: 'Income', n: 1, f: sg }, { k: 'Upkeep', n: 1, f: sg }, { k: 'Spending', n: 1, f: sg }, { k: 'Other', n: 1, f: sg },
+      { k: 'Closing', n: 1, f: function (v, r) { return '<b>' + fmt(num(v)) + '</b>' + delta(num(v) - num(r['Opening'])); } }
+    ], { empty: 'No movement in your stockpiles this turn.' });
+    var lines = T(RP.st);
+    if (lines.length) h += '<details class="evarc"><summary>Every ledger line this turn (' + lines.length + ')</summary>' + table(lines, [
+      { k: 'Phase' }, { k: 'Resource', f: function (v) { return ico(v) + esc(v); } },
+      { k: 'Amount', n: 1, f: function (v) { return delta(num(v)); } }, { k: 'Reason' }, { k: 'Balance after', n: 1 }
+    ]) + '</details>';
+    $('#report').innerHTML = h + '</div>';
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-rt]'); if (!b) return;
+    RP.turn = +b.dataset.rt; drawReport(RP.acc, RP.out, RP.rep, RP.ev, RP.st);
+  });
+
   function drawStatement(rows) {
+    if (!$('#statement')) return;
     $('#statement').innerHTML = table(rows, [
       { k: 'Turn', n: 1 }, { k: 'Phase' },
       { k: 'Resource', f: function (v) { return ico(v) + esc(v); } },
@@ -1194,13 +1250,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function load() {
     VIEW = null;
     Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
-      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes')])
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes'), soft('Accounts'), soft('Outcomes'), soft('Reports')])
       .then(function (r) {
         RECIPES = r[20] || [];
         S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
         STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
         drawHero(); drawStock(r[1]); drawOrders(r[2]); drawVitals(); drawWorks(r[3]);
-        drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawStatement(r[8]);
+        drawRealm(r[4], r[5]); drawForces(r[6]); drawState(r[7]); drawReport(r[21], r[22], r[23], r[19], r[8]);
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
         reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]); drawEvents(r[19]);

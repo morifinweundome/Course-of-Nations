@@ -86,7 +86,7 @@ function pfWorkbook_(book) {
     lanes: pfRows_(pfTab_(book, 'Lanes')), treaties: pfRows_(pfTab_(book, 'Treaties')),
     debts: pfRows_(pfTab_(book, 'Debts')), inbox: pfRows_(pfTab_(book, 'Orders inbox')),
     tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control')),
-    events: pfRows_(pfTab_(book, 'Events')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
+    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
   };
   W.nations.forEach(function (n) { n.id = n.get('Nation ID'); });
   pfRows_(pfTab_(book, 'Calculations')).forEach(function (c) { W.calc[c.get('Nation ID')] = c; });
@@ -274,9 +274,9 @@ function pfRecord_(W, n) {
     fiscal.push([f.get('Instrument'), f.get('Intensity'), f.get('As written'), f.get('Since turn')]);
   });
 
-  // statement: the lines shown to the player, latest three turns
+  // statement: the lines shown to the player, latest ten turns
   var statement = [['Turn', 'Phase', 'Resource', 'Amount', 'Reason', 'Balance after']];
-  W.ledger.filter(function (l) { return l.get('Nation') === id && l.get('Shown to player') !== 'No' && l.num('Turn') >= turn - 2; })
+  W.ledger.filter(function (l) { return l.get('Nation') === id && l.get('Shown to player') !== 'No' && l.num('Turn') >= turn - 9; })
     .sort(function (a, b) { return b.num('Turn') - a.num('Turn') || b.num('Entry') - a.num('Entry'); })
     .forEach(function (l) { statement.push([l.get('Turn'), l.get('Phase'), l.get('Resource'), l.get('Amount'), l.get('Reason'), l.get('Balance after')]); });
 
@@ -508,6 +508,9 @@ function pfExtras_(W, n, rec, ss) {
   });
   rec.Recipes = RC;
 
+  // ---- turn reports: accounts by turn, order outcomes, and the GM's written report
+  pfReports_(W, n, rec);
+
   // ---- history: one line per turn, kept across refreshes
   var H = [['Turn', 'Industry', 'Energy', 'Research', 'Influence', 'Stability', 'Systems held', 'Fleet Power', 'Population (bn)', 'GDP (SM)']];
   var old = ss.getSheetByName('History');
@@ -515,4 +518,61 @@ function pfExtras_(W, n, rec, ss) {
   H.push([W.turn, n.num('Industry'), n.num('Energy'), n.num('Research'), n.num('Influence'), n.num('Stability'), c.num('Systems held'), c.num('Fleet Power'), c.num('Population (bn)'), c.num('GDP (SM)')]);
   H = [H[0]].concat(H.slice(1).sort(function (a, b) { return Number(a[0]) - Number(b[0]); }).slice(-60));
   rec.History = H;
+}
+
+
+/* ------------------------------------------------------------------ turn reports */
+
+/**
+ * Writes three tabs for the nation page's Turn report:
+ *  Accounts  - per turn and resource: opening, income, upkeep, spending, other, closing (from the Ledger)
+ *  Outcomes  - each order the nation sent, with what became of it (never the GM's working)
+ *  Reports   - the GM's player-facing write-up for the turn (the workbook's Reports tab)
+ * The full Ledger stays in the workbook; the Statement tab keeps the last ten turns' lines.
+ */
+function pfReports_(W, n, rec) {
+  var id = n.id, KEEP = 10, first = Math.max(0, W.turn - KEEP + 1);
+  var mains = PF_MAIN.concat(PF_STRAT, PF_ADV);
+  var lines = W.ledger.filter(function (l) { return l.get('Nation') === id && l.get('Shown to player') !== 'No' && mains.indexOf(l.get('Resource')) >= 0; })
+    .sort(function (a, b) { return a.num('Turn') - b.num('Turn') || a.num('Entry') - b.num('Entry'); });
+  var bal = {}, acc = {};
+  lines.forEach(function (l) {
+    var t = l.num('Turn'), k = l.get('Resource'), a = l.num('Amount');
+    if (t >= first) {
+      var key = t + '|' + k;
+      var o = acc[key] || (acc[key] = { t: t, k: k, open: bal[k] || 0, Income: 0, Upkeep: 0, Spending: 0, Other: 0 });
+      var ph = l.get('Phase'); o[o.hasOwnProperty(ph) && ph !== 'open' ? ph : 'Other'] += a;
+    }
+    bal[k] = (bal[k] || 0) + a;
+  });
+  var A = [['Turn', 'Resource', 'Opening', 'Income', 'Upkeep', 'Spending', 'Other', 'Closing']];
+  Object.keys(acc).map(function (k) { return acc[k]; })
+    .sort(function (a, b) { return b.t - a.t || mains.indexOf(a.k) - mains.indexOf(b.k); })
+    .forEach(function (o) {
+      var close = o.open + o.Income + o.Upkeep + o.Spending + o.Other;
+      A.push([o.t, o.k, pfRound_(o.open), pfRound_(o.Income), pfRound_(o.Upkeep), pfRound_(o.Spending), pfRound_(o.Other), pfRound_(close)]);
+    });
+  rec.Accounts = A;
+
+  var said = {};
+  W.reports.forEach(function (r) { if (r.get('Nation') === id && r.get('Action row') && r.get('Shown to player') !== 'No') said[r.get('Action row')] = r.get('Heading') || r.get('Text'); });
+  var O = [['Turn', 'Row', 'Channel', 'Order', 'Outcome', 'Note']];
+  W.actions.filter(function (a) { return a.get('Nation') === id && a.num('Turn') >= first && a.num('Turn') <= W.turn; })
+    .sort(function (a, b) { return b.num('Turn') - a.num('Turn') || a.num('Row') - b.num('Row'); })
+    .forEach(function (a) {
+      var st = a.get('Status'), row = a.get('Row'), flag = pfClean_(a.get('Flag')).replace(/^GM ruling:?\s*/i, '').replace(/[;,]\s*$/, '');
+      var out, note;
+      if (st === 'Applied') { out = 'Carried out'; note = flag || a.get('Elaboration summary'); }
+      else if (st === 'Rejected') { out = 'Refused'; note = flag; }
+      else if (st === 'Settled by GM') { out = 'Ruled'; note = said[row] || 'Ruled by the GM: see the report.'; }
+      else { out = st || 'Pending'; note = ''; }
+      O.push([a.get('Turn'), row, a.get('Channel'), a.get('Posted text'), out, note]);
+    });
+  rec.Outcomes = O;
+
+  var R = [['Turn', 'Section', 'Action row', 'Heading', 'Text']];
+  W.reports.filter(function (r) { return r.get('Nation') === id && r.get('Shown to player') !== 'No' && (r.get('Heading') || r.get('Text')); })
+    .sort(function (a, b) { return b.num('Turn') - a.num('Turn') || a.row - b.row; })
+    .forEach(function (r) { R.push([r.get('Turn'), r.get('Section') || 'Report', r.get('Action row'), r.get('Heading'), r.get('Text')]); });
+  rec.Reports = R;
 }
