@@ -387,7 +387,8 @@ function pfExtras_(W, n, rec, ss) {
   Object.keys(best).sort(function (a, b) { return best[a].d - best[b].d || (a < b ? -1 : 1); }).forEach(function (k) {
     var s = sysBy[k]; if (!s) return;
     var ch = !!cs.charted[k], owner = s.get('Owner');
-    var col = !owner && ch ? (ownDist[k] != null && ownDist[k] <= reachCol ? 'Direct' : 'Expedition') : '';
+    // Colonization needs no discovery (rules, Colonization): uncharted systems in reach are offered too, without revealing who holds them.
+    var col = (!ch || !owner) ? (ownDist[k] != null && ownDist[k] <= reachCol ? 'Direct' : 'Expedition') + (ch ? '' : ' (uncharted)') : '';
     reach.push([k, ch ? s.get('Name') : '', best[k].from, best[k].d, best[k].d <= range ? 'Yes' : 'With isotopes',
       ch ? 'Yes' : 'No', ch && owner ? (natName[owner] || owner) : '', ch ? s.get('Class') : '', ch ? s.get('Environment') : '',
       ch ? s.get('Deposits') : '', ch ? s.get('Feature') : '', col]);

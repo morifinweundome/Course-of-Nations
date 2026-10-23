@@ -594,6 +594,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         out.cost.Energy = num(c['Energy']); out.cost.Influence = num(c['Influence']);
         if (others.some(function (x) { return x.verb === 'COLONIZE' && x.sys === r.sys; })) bad('Already in your basket.');
         else if (num(kv('Stability')) <= 3) bad('A nation in Unrest or worse may not colonize this turn.');
+        else if (t['Charted'] === 'No') { out.msg = 'Uncharted: its world, life and deposits are unknown until the colony lands; if another power already holds it, the order fails. ' + (/^Expedition/.test(t['Colonize']) ? 'Beyond direct reach: an expedition at the colony\'s cost, travelling at your jump range.' : 'Within direct reach.') + ' 0.3 bn settlers leave your worlds.'; out.cls = 'wait'; }
         else { out.msg = (t['Class'] || '') + ' ' + (t['Environment'] || '') + (t['Deposits'] ? ' · ' + t['Deposits'] : '') + ' · ' + (t['Colonize'] || '') + ' · 0.3 bn settlers leave your worlds'; out.cls = 'ok'; }
         break;
       }
@@ -688,7 +689,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         break;
       case 'COLONIZE':
         f = '<select data-f="sys">' + bkOpt(BK.reach.filter(function (x) { return !x['Owner'] && x['Colonize'] && !/^no/i.test(x['Colonize']); })
-          .map(function (x) { return [x['System ID'], x['System ID'] + ' · ' + (x['Class'] || '') + ' ' + (x['Environment'] || '') + ' · ' + x['Colonize']]; }), r.sys, 'Target…') + '</select>';
+          .map(function (x) { return [x['System ID'], x['System ID'] + ' · ' + (x['Charted'] === 'No' ? 'uncharted, contents unknown' : (x['Class'] || '') + ' ' + (x['Environment'] || '')) + ' · ' + x['Colonize'].replace(' (uncharted)', '') + ' · ' + x['Jumps'] + (x['Jumps'] === '1' ? ' jump' : ' jumps')]; }), r.sys, 'Target…') + '</select>';
         break;
       case 'SHIP': case 'GROUND':
         var grp = r.verb === 'SHIP' ? 'Ships' : 'Ground formations';
