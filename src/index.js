@@ -6,6 +6,7 @@
 import { GAMES, findGame } from "./games.js";
 import { sign, verify, getCookie, cookie } from "./session.js";
 import { GM_REFERENCE, SYNTHESIS } from "./gm_pages.js";
+import { MATERIAL_ICONS } from "./material_icons.js";
 
 const SESSION_COOKIE = "con_session";
 const STATE_COOKIE = "con_state";
@@ -186,7 +187,9 @@ async function api(request, env, url) {
     }
 
     if (action === "view") {
-      return json(await callGateway(game, env, { action: "view", discordId: user.id }));
+      const v = await callGateway(game, env, { action: "view", discordId: user.id });
+      await attachMaterialIcons(v, env);
+      return json(v);
     }
 
     if (action === "submit") {
@@ -227,6 +230,23 @@ async function decryptPage(blob, keyB64) {
   const [iv, data] = blob.split(".");
   const key = await crypto.subtle.importKey("raw", b64(keyB64.trim()), "AES-GCM", false, ["decrypt"]);
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(iv) }, key, b64(data)));
+}
+// Symbols for advanced materials: only those whose recipes this nation knows, keyed by its own name for each.
+async function attachMaterialIcons(v, env) {
+  try {
+    const rec = v && v.ok && v.tabs && v.tabs.Recipes;
+    if (!rec || rec.length < 2 || !env.GM_PAGES_KEY) return;
+    const h = rec[0].map((x) => String(x).trim()), ri = h.indexOf("Recipe"), ii = h.indexOf("Inputs");
+    if (ri < 0 || ii < 0) return;
+    const all = JSON.parse(await decryptPage(MATERIAL_ICONS, env.GM_PAGES_KEY));
+    const icons = {};
+    rec.slice(1).forEach((r, n) => {
+      const name = String(r[ri] || "").trim();
+      const key = String(r[ii] || "").split("+").map((x) => x.trim().toLowerCase()).filter(Boolean).sort().join("|");
+      if (name && all[key]) icons[name] = all[key].split("__ID__").join("advsym-" + (n + 1));
+    });
+    v.icons = icons;
+  } catch (e) { /* icons are decoration: never fail the view */ }
 }
 async function gmPage(request, env, url) {
   const user = await currentUser(request, env);

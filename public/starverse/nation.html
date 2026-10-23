@@ -422,6 +422,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     $('#sheet').hidden = true; $('#gate').hidden = false;
   }
   var VIEW = null;
+  /* symbols for the advanced materials this nation knows, sent with its view */
+  function advIcons(icons) {
+    if (!icons || !window.SISym) return;
+    var old = document.getElementById('adv-sprite'); if (old) old.remove();
+    var names = Object.keys(icons); if (!names.length) return;
+    var d = document.createElement('div');
+    d.innerHTML = '<svg id="adv-sprite" aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden">' + names.map(function (n) { return icons[n]; }).join('') + '</svg>';
+    document.body.insertBefore(d.firstChild, document.body.firstChild);
+    names.forEach(function (n) { var m = /id="(advsym-\d+)"/.exec(icons[n]); if (m) SISym.names[n] = m[1]; });
+  }
   function loadView() {
     VIEW = fetch(API + '/view', { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) {
@@ -430,6 +440,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       })
       .then(function (v) {
         if (!v.ok) { gate('No nation to show', v.error || 'This account holds no nation in this game.'); throw 'none'; }
+        advIcons(v.icons);
         return v;
       });
     return VIEW;
@@ -986,13 +997,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     if (!adv.length && !rec.length) { $('#synth').hidden = true; return; }
     $('#synth').hidden = false;
     $('#advStock').innerHTML = adv.length ? table(adv, [
-      { k: 'Resource', t: 'Material', f: function (v) { return '<b>' + esc(v) + '</b>'; } },
+      { k: 'Resource', t: 'Material', f: function (v) { return ico(v) + '<b>' + esc(v) + '</b>'; } },
       { k: 'Stockpile', t: 'Held', n: 1, f: function (v) { return fmt(num(v)); } },
       { k: 'Committed', t: 'Orders', n: 1, f: function (v) { return num(v) ? fmt(-num(v), true) : '—'; } },
       { k: 'Projected', n: 1, f: function (v, r) { return '<b>' + fmt(num(v)) + '</b>' + delta(num(v) - num(r['Stockpile'])); } }
     ]) : '<div class="none">None made yet. A Synthesis Works turns a recipe\'s inputs into its material each turn.</div>';
     $('#recipes').innerHTML = rec.length ? table(rec, [
-      { k: 'Recipe', f: function (v, r) { return '<b>' + esc(v) + '</b>' + (/exceptional/i.test(r['Variant'] || '') ? ' <span class="pill ok">Exceptional</span>' : ''); } },
+      { k: 'Recipe', f: function (v, r) { return ico(v) + '<b>' + esc(v) + '</b>' + (/exceptional/i.test(r['Variant'] || '') ? ' <span class="pill ok">Exceptional</span>' : ''); } },
       { k: 'Inputs', f: function (v) { return esc(v); } },
       { k: 'Effect', f: function (v) { return esc(v); } },
       { k: 'Learned (turn)', t: 'Learned', n: 1 }
