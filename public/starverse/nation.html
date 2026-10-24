@@ -236,6 +236,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         <p class="note" id="stockNote"></p>
         <div class="res" id="main4"></div>
       </div>
+      <div class="group" id="outGroup" hidden>
+        <h2>How your income is reckoned</h2>
+        <p class="note">Your systems' output, then the national modifiers that apply to all of it, by source, then fuel and standing charges. Modifiers add together before they apply: a total of +36% multiplies output by 1.36.</p>
+        <div id="output"></div>
+      </div>
       <div class="group">
         <h2>Events</h2>
         <p class="note" id="evNote"></p>
@@ -965,6 +970,23 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   }
 
   var MAIN = ['Industry', 'Energy', 'Research', 'Influence'];
+  var OUTROWS = [];
+  function outRow(kind) { for (var i = 0; i < OUTROWS.length; i++) if (OUTROWS[i]['Kind'] === kind) return OUTROWS[i]; return null; }
+  function drawOutput() {
+    if (!OUTROWS.length) { $('#outGroup').hidden = true; return; }
+    $('#outGroup').hidden = false;
+    var cell = function (k) { return function (v, r) {
+      if (v === '' || v == null) return '';
+      var x = num(v), kd = r['Kind'];
+      if (kd === 'pct') return Math.abs(x) < 0.05 ? '' : delta(x) + '%';
+      if (kd === 'pcttotal') return '<b>' + fmt(x, true) + '%</b>';
+      if (kd === 'sum') return '<b>' + fmt(x) + '</b>';
+      if (kd === 'flow') return delta(x);
+      return fmt(x);
+    }; };
+    $('#output').innerHTML = table(OUTROWS, [{ k: 'Line', t: '', f: function (v, r) { return /sum|pcttotal|base/.test(r['Kind']) ? '<b>' + esc(v) + '</b>' : esc(v); } }]
+      .concat(MAIN.map(function (k) { return { k: k, t: k, n: 1, f: cell(k) }; })));
+  }
   function drawStock(rows) {
     var by = {}; rows.forEach(function (r) { by[r['Resource']] = r; });
     var prepared = kv('Orders prepared') === 'Yes';
@@ -977,7 +999,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       return '<div class="rc' + (short ? ' short' : '') + '">' + (short ? '<span class="flag">Short</span>' : '') +
         '<div class="hd">' + ico(k, 'lg') + esc(k) + '</div>' +
         '<div class="big">' + fmt(s) + '</div><div class="sub">In store</div>' +
-        '<dl><dt>Income</dt><dd>' + fmt(inc, true) + '</dd>' +
+        '<dl>' + (outRow('base') ? '<dt>Systems</dt><dd>' + fmt(num(outRow('base')[k])) + '</dd><dt>Modifiers</dt><dd>' + fmt(num((outRow('pcttotal') || {})[k]), true) + '%</dd>' : '') +
+        '<dt>Income</dt><dd>' + fmt(inc, true) + '</dd>' +
         '<dt>Upkeep</dt><dd>' + (up ? fmt(-up, true) : '—') + '</dd>' +
         '<dt>Orders</dt><dd>' + (com ? fmt(-com, true) : prepared ? '—' : 'not yet costed') + '</dd></dl>' +
         '<div class="bar" title="Now and projected"><i class="p" style="width:' + Math.max(0, p) / top * 100 + '%"></i><i style="width:' + Math.min(s, Math.max(p, 0)) / top * 100 + '%"></i></div>' +
@@ -1424,12 +1447,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   function load() {
     VIEW = null;
     Promise.all([get('Sheet'), get('Stockpiles'), soft('Orders'), soft('Works'), soft('Systems'), soft('Worlds'), soft('Forces'), soft('Fiscal'), soft('Statement'),
-      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes'), soft('Accounts'), soft('Outcomes'), soft('Reports'), soft('Exchange'), soft('Exchange orders'), soft('Leased out')])
+      soft('Reach'), soft('Prices'), soft('Upkeep'), soft('Stability'), soft('Receipt'), soft('Contacts'), soft('Treaties'), soft('Debts'), soft('History'), soft('Plans'), soft('Events'), soft('Recipes'), soft('Accounts'), soft('Outcomes'), soft('Reports'), soft('Exchange'), soft('Exchange orders'), soft('Leased out'), soft('Output')])
       .then(function (r) {
         RECIPES = r[20] || []; EXROWS = r[24] || []; EXORD = r[25] || [];
+        OUTROWS = r[27] || [];
         S = {}; r[0].forEach(function (o) { S[o['Key']] = o['Value']; });
         STOCK = {}; r[1].forEach(function (o) { STOCK[o['Resource']] = o; });
-        drawHero(); drawStock(r[1]); drawOrders(r[2]); drawVitals(); drawWorks(r[3]);
+        drawHero(); drawStock(r[1]); drawOutput(); drawOrders(r[2]); drawVitals(); drawWorks(r[3]);
         drawRealm(r[4], r[5]); drawLeasedOut(r[26]); drawForces(r[6]); drawState(r[7]); drawReport(r[21], r[22], r[23], r[19], r[8]); drawExchange();
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);

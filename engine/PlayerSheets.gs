@@ -86,8 +86,10 @@ function pfWorkbook_(book) {
     lanes: pfRows_(pfTab_(book, 'Lanes')), treaties: pfRows_(pfTab_(book, 'Treaties')),
     debts: pfRows_(pfTab_(book, 'Debts')), inbox: pfRows_(pfTab_(book, 'Orders inbox')),
     tables: pfTab_(book, 'Tables'), control: pfRows_(pfTab_(book, 'Control')),
-    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), unlocks: pfRows_(pfTab_(book, 'Unlocks')), exchange: pfRows_(pfTab_(book, 'Exchange')), exorders: pfRows_(pfTab_(book, 'Exchange orders')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log'))
+    events: pfRows_(pfTab_(book, 'Events')), reports: pfRows_(pfTab_(book, 'Reports')), unlocks: pfRows_(pfTab_(book, 'Unlocks')), exchange: pfRows_(pfTab_(book, 'Exchange')), exorders: pfRows_(pfTab_(book, 'Exchange orders')), recipes: pfRows_(pfTab_(book, 'Recipes')), turnlog: pfRows_(pfTab_(book, 'Turn log')),
+    standing: pfRows_(pfTab_(book, 'Standing effects')), helper: {}
   };
+  pfRows_(pfTab_(book, 'Calc helper')).forEach(function (h) { W.helper[h.get('Nation ID')] = h; });
   W.nations.forEach(function (n) { n.id = n.get('Nation ID'); });
   pfRows_(pfTab_(book, 'Calculations')).forEach(function (c) { W.calc[c.get('Nation ID')] = c; });
   W.sysName = {}; W.systems.forEach(function (s) { W.sysName[s.get('System ID')] = s.get('Name'); });
@@ -162,6 +164,24 @@ function pfClean_(t) {
 }
 function pfRound_(x) { return Math.round(x * 10) / 10; }
 
+/** A constant from Tables!T_CONST (the first column holds the name, the second the value). */
+function pfConst_(W, key, dflt) {
+  var rows = (W.tables && W.tables.rows) || [];
+  for (var i = 0; i < rows.length; i++) if (String(rows[i][0]).trim() === key) { var x = parseFloat(rows[i][1]); return isFinite(x) ? x : dflt; }
+  return dflt;
+}
+
+/** This nation's standing effects that apply when the next turn resolves (Income and Upkeep phases). */
+function pfStanding_(W, id) {
+  var t = W.turn + 1;
+  return W.standing.filter(function (e) {
+    if (e.get('Nation') !== id || !/^yes$/i.test(e.get('Active'))) return false;
+    if (!/^(Income|Upkeep)$/i.test(e.get('Phase'))) return false;
+    var from = e.num('From turn'), until = e.get('Until turn') === '' ? Infinity : e.num('Until turn');
+    return (!from || from <= t) && t <= until;
+  });
+}
+
 function pfStrat_(text) {
   var out = {};
   String(text || '').split(/\s*[;,]\s*/).forEach(function (p) {
@@ -190,6 +210,11 @@ function pfRecord_(W, n) {
   PF_STRAT.forEach(function (k) { income[k] = c.num(k); });
   var upkeep = { Energy: c.num('Upkeep Energy'), Influence: c.num('Upkeep Influence'), 'Volatile isotopes': c.num('Upkeep Volatile isotopes') };
   // leases: what this nation pays as lessee (upkeep) and receives as lessor (income) each turn
+  // standing effects (a Neural Lattice's Research, an encryption's Energy): gains as income, charges as upkeep
+  pfStanding_(W, id).forEach(function (e) {
+    var k = e.get('Resource'), a = e.num('Amount per turn');
+    if (a > 0) income[k] = (income[k] || 0) + a; else upkeep[k] = (upkeep[k] || 0) - a;
+  });
   var lf = pfLeaseFlow_(W, id);
   Object.keys(lf).forEach(function (k) { if (lf[k] > 0) income[k] = (income[k] || 0) + lf[k]; else upkeep[k] = (upkeep[k] || 0) - lf[k]; });
   var stock = [['Resource', 'Kind', 'Stockpile', 'Income', 'Upkeep', 'Committed', 'Net this turn', 'Projected']];
@@ -511,6 +536,54 @@ function pfExtras_(W, n, rec, ss) {
   if (totalI > 0.05) U.push(['Treaties and charters', '', '', r1(totalI) + ' Influence']);
   U.push(['Wages are paid in Marks, or in Industry, Energy and Influence at 1 a Mark, from your largest stockpiles first', '', '', '']);
   rec.Upkeep = U;
+
+  // ---- how income is reckoned: systems' output, the national modifiers by source, then upkeep
+  var h = W.helper[id] || pfRow_([], [], 0);
+  var tierOf = { Industry: tiers.Industry, Energy: tiers.Industry, Research: tiers.Society, Influence: tiers.Society };
+  var habitat = n.get('Habitat') || n.get('Biology');
+  var perTier = pfConst_(W, 'Tech output % per tier above 1', 10), perTrade = pfConst_(W, 'Trade agreement bonus %', 5), perPact = pfConst_(W, 'Technology pact Research %', 5);
+  var trade = Math.min(c.num('Trade agreements'), c.num('Trade slots'));
+  var src = [
+    ['Government, ideology and civics', function (k) { return h.num(k + ' %') + h.num('All output %'); }],
+    ['Species', function (k) {
+      var v = n.num('Species ' + k + ' %') + n.num('Species all output %');
+      if (k === 'Industry' && /Aquatic/.test(n.get('Habitat')) && tiers.Industry < 3) v -= 10;
+      if (k === 'Energy' && /Aquatic/.test(n.get('Habitat'))) v += 5;
+      if (k === 'Research' && /Subterranean/.test(n.get('Habitat')) && tiers.Society < 3) v -= 10;
+      return v; }],
+    ['Technology (' + perTier + '% a tier above 1)', function (k) { return perTier * Math.max(0, tierOf[k] - 1); }],
+    ['Trade agreements (' + perTrade + '% each)', function () { return perTrade * trade; }],
+    ['Stability', function () { return c.num('Stability band %'); }],
+    ['Consolidation (governing under capacity)', function () { return c.num('Consolidation %'); }],
+    ['Fiscal code: net revenue', function () { return c.num('Fiscal revenue %'); }],
+    ['Fiscal code: instruments on this resource', function (k) { return c.num('Fiscal ' + k + ' %'); }],
+    ['Tariffs paid', function () { return -c.num('Tariff losses %'); }],
+    ['Renown', function (k) { return k === 'Influence' ? c.num('Renown Influence %') : 0; }],
+    ['Technology pacts', function (k) { return k === 'Research' ? perPact * c.num('Technology pacts') : 0; }]
+  ];
+  var O = [['Line', 'Kind', 'Industry', 'Energy', 'Research', 'Influence']];
+  O.push(['Output of your systems', 'base'].concat(PF_MAIN.map(function (k) { return pfRound_(c.num('Gross ' + k)); })));
+  var seen = PF_MAIN.map(function () { return 0; });
+  src.forEach(function (sx) {
+    var v = PF_MAIN.map(function (k) { return pfRound_(sx[1](k)); });
+    v.forEach(function (x, i) { seen[i] += x; });
+    if (v.some(function (x) { return Math.abs(x) >= 0.05; })) O.push([sx[0], 'pct'].concat(v));
+  });
+  var tot = PF_MAIN.map(function (k) { return pfRound_(c.num(k + ' %')); });
+  var rest = tot.map(function (x, i) { return pfRound_(x - seen[i]); });
+  if (rest.some(function (x) { return Math.abs(x) >= 0.05; })) O.push(['Other modifiers', 'pct'].concat(rest));
+  O.push(['National modifiers, total', 'pcttotal'].concat(tot));
+  O.push(['Income after modifiers', 'sum'].concat(PF_MAIN.map(function (k) { return pfRound_(c.num('Net ' + k)); })));
+  var flow = PF_MAIN.map(function (k) { return c.num('Net ' + k); });
+  var fuel = c.num('Upkeep Energy'), infl = c.num('Upkeep Influence');
+  if (fuel || infl) { O.push(['Fuel and treaty upkeep', 'flow', '', fuel ? -fuel : '', '', infl ? -infl : '']); flow[1] -= fuel; flow[3] -= infl; }
+  pfStanding_(W, id).forEach(function (e) {
+    var i = PF_MAIN.indexOf(e.get('Resource')); if (i < 0) return;
+    var row = [e.get('Reason') || e.get('Group') || 'Standing effect', 'flow', '', '', '', '']; row[2 + i] = e.num('Amount per turn'); flow[i] += e.num('Amount per turn');
+    O.push(row);
+  });
+  O.push(['Left each turn, before wages and orders', 'sum'].concat(flow.map(pfRound_)));
+  rec.Output = O;
 
   // ---- stability
   var S = [['Component', 'Value']];
