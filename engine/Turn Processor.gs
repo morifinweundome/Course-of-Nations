@@ -989,6 +989,9 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted, copies) {
   if (isExtractor) {
     plan = tpExtractorPlan_(sys, existing, depositWanted);
     if (plan.error) return tpReject_(plan.error);
+  } else if (b.builtName && /^synthesis works/i.test(b.builtName)) {
+    // Designer, Turn 38: several Synthesis Works may stand in one system, each making a different recipe.
+    if (existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.builtName); })) return tpReject_(b.builtName + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; a system may hold one Works per recipe');
   } else if (!stackable && existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name) || tpNorm_(String(x).replace(/\s*\(.*\)\s*$/, '')) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
   var r = b.req || {};
   var tiers = sim.tiers;

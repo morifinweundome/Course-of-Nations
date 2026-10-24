@@ -558,10 +558,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         out.cost.Industry = num(b.Industry); out.strat = bkStratParse(b.Strategic);
         var have = String(s['Buildings'] || '').split(/\s*,\s*/).filter(Boolean);
         var stack = BK_STACK.indexOf(b.Item) >= 0;
-        var dupBasket = !stack && others.some(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && x.what === r.what && (r.what !== 'Extractor' || x.res === r.res); });
+        var perRes = r.what === 'Extractor' || r.what === 'Synthesis Works';
+        var dupBasket = !stack && others.some(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && x.what === r.what && (!perRes || x.res === r.res); });
         if (b.locked) bad('Not yet unlocked: ' + (b.Requires || 'requirements not met') + '.');
         else if (r.what === 'Extractor') {
           if (r.res && have.indexOf('Extractor (' + r.res + ')') >= 0) bad('An Extractor already works that deposit here.');
+          else if (dupBasket) bad('Already in your basket.');
+        } else if (r.what === 'Synthesis Works') {
+          if (r.res && have.indexOf('Synthesis Works (' + r.res + ')') >= 0) bad('A Synthesis Works already makes ' + r.res + ' here; a system may hold one Works per recipe.');
           else if (dupBasket) bad('Already in your basket.');
         } else if (!stack && have.some(function (h) { return h === b.Item || h.replace(/\s*\(.*\)\s*$/, '') === b.Item; }) || dupBasket) bad(b.Item + ' already stands (or is ordered) in ' + s['System ID'] + '; once per system.');
         if (!out.cls && b.once === 'nation' && (BK.sys.some(function (x) { return String(x['Buildings']).indexOf(b.Item) >= 0; }) || others.some(function (x) { return x.verb === 'BUILD' && x.what === b.Item; })))
