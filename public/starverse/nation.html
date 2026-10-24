@@ -516,7 +516,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   var BK_SITE = { 'Infantry': 'Barracks', 'Specialised Infantry': 'Barracks', 'Special Forces': 'Barracks', 'Armour': 'Vehicle Factory', 'Heavy Armour': 'Vehicle Factory', 'Artillery': 'Vehicle Factory', 'Heavy Artillery': 'Vehicle Factory' };
   var BK_VERBS = [
     ['BUILD', 'Build'], ['DEVELOP', 'Develop'], ['DESIGNATE', 'Designate'], ['RESEARCH', 'Research'], ['COLONIZE', 'Colonize'],
-    ['SHIP', 'Ships'], ['GROUND', 'Ground forces'], ['DEFENCE', 'Static Defence'], ['MOVE', 'Move a force'], ['STABILITY', 'Buy Stability'], ['NAME', 'Name a system or world']
+    ['SHIP', 'Ships'], ['GROUND', 'Ground forces'], ['DEFENCE', 'Static Defence'], ['MOVE', 'Move a force'], ['STABILITY', 'Buy Stability'], ['SETTLE', 'Settle a world'], ['RESETTLE', 'Move people between worlds'], ['NAME', 'Name a system or world']
   ];
 
   function bkStore(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
@@ -531,6 +531,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   }
   function bkSysLabel(s) { return (s['Name'] ? s['Name'] + ' ' : '') + s['System ID']; }
   function bkSys(id) { return BK.sys.filter(function (s) { return s['System ID'] === id; })[0]; }
+  function bkWorlds(sid) { return (BK.worlds || []).filter(function (w) { return w['System ID'] === sid; }); }
   function bkHeld() { return BK.sys.map(function (s) { return [s['System ID'], bkSysLabel(s)]; }); }
   function bkBuildings() {
     var list = BK.prices.filter(function (r) { return r['Group'] === 'Buildings' && num(r['Industry']) > 0 && r['Unlocked'] !== ''; })
@@ -671,6 +672,27 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         out.msg = 'Jump range ' + (kv('Jump range') || '?') + ' (' + (kv('Jump range with Volatile isotopes') || '?') + ' with Volatile isotopes).'; out.cls = 'ok';
         break;
       }
+      case 'SETTLE': {
+        var ss = bkSys(r.sys), sw = bkWorlds(r.sys).filter(function (x) { return x['World'] === r.what; })[0];
+        if (!ss || !sw) { bad('Choose a system and the world to settle.'); break; }
+        out.text = 'SETTLE ' + sw['World'] + ' @ ' + ss['System ID'];
+        var cc = BK.prices.filter(function (x) { return x['Group'] === 'Colonies'; })[0] || { Energy: 5, Influence: 5 };
+        out.cost.Energy = Math.ceil(num(cc['Energy']) / 2); out.cost.Influence = Math.ceil(num(cc['Influence']) / 2);
+        if (others.some(function (x) { return x.verb === 'SETTLE' && x.sys === r.sys; })) bad('One world a turn may be settled in a system.');
+        else if (num(ss['Population (bn)']) < 0.6) bad(ss['System ID'] + ' holds too few people to send 0.3 bn settlers.');
+        else { out.msg = 'Half a colony\'s cost (estimate; the exact price follows its environment) · 0.3 bn settlers from ' + ss['System ID'] + ' · its full carrying capacity counts from next turn'; out.cls = 'ok'; }
+        break;
+      }
+      case 'RESETTLE': {
+        var rs = bkSys(r.sys), q2 = num(r.qty), fw = bkWorlds(r.sys).filter(function (x) { return x['World'] === r.from; })[0], tw = bkWorlds(r.sys).filter(function (x) { return x['World'] === r.to; })[0];
+        if (!rs || !fw || !tw || !(q2 > 0)) { bad('Choose a system, the worlds and how many billion move.'); break; }
+        out.text = 'RESETTLE ' + q2 + ' bn FROM ' + fw['World'] + ' TO ' + tw['World'] + ' @ ' + rs['System ID'];
+        var cap10 = Math.round(num(fw['Population (bn)']) * 100) / 1000;
+        if (fw === tw) bad('Choose two different worlds.');
+        else if (q2 > cap10 + 1e-9) bad('At most 10% of ' + fw['World'] + ' a turn: ' + cap10 + ' bn.');
+        else { out.msg = 'Free'; out.cls = 'ok'; }
+        break;
+      }
       case 'NAME': {
         var sn = bkSys(r.sys), nm = String(r.name || '').trim(), wd = String(r.world || '').trim();
         if (!sn || !nm) { bad('Choose a system and write its new name.'); break; }
@@ -759,6 +781,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       case 'MOVE':
         f = '<select data-f="what">' + bkOpt(BK.forces.map(function (x) { return [x['Force ID'], (x['Name'] ? x['Name'] + ' ' : '') + x['Force ID'] + ' · at ' + (x['Location'] || '?')]; }), r.what, 'Force…') + '</select> to ' +
           '<input data-f="dest" placeholder="System ID, e.g. II-15" value="' + esc(r.dest || '') + '" style="width:150px">';
+        break;
+      case 'SETTLE':
+        f = '<select data-f="sys">' + bkOpt(bkHeld(), r.sys, 'System…') + '</select> ' +
+          '<select data-f="what">' + bkOpt(bkWorlds(r.sys).filter(function (x) { return x['Habitable'] === 'Yes' && x['Settled'] !== 'Yes'; }).map(function (x) { return [x['World'], x['World'] + ' · ' + x['Environment']]; }), r.what, 'Habitable world…') + '</select>';
+        break;
+      case 'RESETTLE':
+        var setw = bkWorlds(r.sys).filter(function (x) { return x['Settled'] === 'Yes'; }).map(function (x) { return [x['World'], x['World'] + ' · ' + fmt(num(x['Population (bn)'])) + ' bn']; });
+        f = '<select data-f="sys">' + bkOpt(bkHeld(), r.sys, 'System…') + '</select> ' +
+          '<input type="number" min="0.01" step="0.01" data-f="qty" value="' + esc(r.qty || '') + '" placeholder="bn" style="width:80px"> bn from ' +
+          '<select data-f="from">' + bkOpt(setw, r.from, 'World…') + '</select> to <select data-f="to">' + bkOpt(setw, r.to, 'World…') + '</select>';
         break;
       case 'NAME':
         f = '<select data-f="sys">' + bkOpt(bkHeld(), r.sys, 'System…') + '</select> ' +
@@ -1487,7 +1519,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         drawSince(r[17]); drawClock(); drawReceipt(r[13]); drawOutlook(r[1]); drawHeadroom(r[4]);
         drawStability(r[12]); drawUpkeep(r[11]); drawWarnings(r[4], r[1]);
         reachRows = r[9]; drawReach(); priceRows = cleanPrices(r[10]); drawPrices(); drawDiplomacy(r[14], r[15], r[16]); drawEvents(r[19]);
-        BK.sys = r[4]; BK.prices = priceRows; BK.plans = r[18] || []; BK.reach = r[9]; BK.forces = r[6]; bkInit();
+        BK.sys = r[4]; BK.worlds = r[5] || []; BK.prices = priceRows; BK.plans = r[18] || []; BK.reach = r[9]; BK.forces = r[6]; bkInit();
         loaded = true; loadAsk();
         stamp('live', 'Record of ' + (kv('Updated') || 'just now') + ' · read ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       })

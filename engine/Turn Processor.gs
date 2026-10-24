@@ -178,7 +178,7 @@ var TURN_CONFIG = {
 
   VERBS: ['DEVELOP', 'DESIGNATE', 'BUILD', 'SHIP', 'GROUND', 'DEFENCE', 'RESEARCH', 'COLONIZE', 'CONTACT', 'MOVE',
           'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL',
-          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE', 'NAME'],
+          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE', 'NAME', 'SETTLE', 'RESETTLE'],
   VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE', REMEDIATION: 'REMEDIATE', RENAME: 'NAME' },
 
   // Rules: Development to level N costs 3 x N Industry.
@@ -186,6 +186,8 @@ var TURN_CONFIG = {
   // Rules: colonization needs Stability above Unrest (4 or more).
   UNREST_AT_OR_BELOW: 3,
   COLONY_SETTLERS_BN: 0.3,
+  // Settling a further world in a held system (designer, Turn 36): half a colony's cost, settlers from the same system.
+  SETTLE_COST_X: 0.5, RESETTLE_MAX_SHARE: 0.1,
   // Rules: each colony after the first ordered in the same turn (expeditions included) costs 5 Influence more.
   COLONY_SURCHARGE_INFLUENCE: 5,
   BASE_JUMP_RANGE: 3,
@@ -834,6 +836,8 @@ function tpEvaluateBody_(world, sim, verb, body, o, phase) {
     case 'TREATY': return tpEvTreaty_(world, sim, args);
     case 'LEASE': return tpEvLease_(world, sim, args);
     case 'NAME': return tpEvName_(world, sim, args);
+    case 'SETTLE': return tpEvSettle_(world, sim, args);
+    case 'RESETTLE': return tpEvResettle_(world, sim, args);
     case 'DISMANTLE': return tpEvDismantle_(world, sim, args);
     case 'REMEDIATE': return tpEvRemediate_(world, sim, args);
     case 'POLICY': case 'INITIATIVE': return tpEvPolicy_(world, sim, verb, args);
@@ -1626,6 +1630,64 @@ function tpEvTreaty_(world, sim, args) {
 // Rules (Partnerships, Leases). An offer is delivered like a treaty proposal and answered next turn. An
 // acceptance makes a treaty: it goes to the GM with the Systems and Treaties cells to fill. LEASE END gives
 // 5 turns' notice on an indefinite lease; on approval the script writes the end turn and tells both parties.
+/** A world row in a system, named by its name, its numeral ("IV") or its orbit. */
+function tpFindWorldRow_(world, sid, text) {
+  var Wt = world.worldsTab, q = tpNorm_(String(text || '').replace(/^(?:the\s+)?world\s+/i, '')), rows = world.worldRows(sid);
+  return rows.filter(function (r) { return tpNorm_(Wt.get(r, 'World')) === q; })[0] ||
+    rows.filter(function (r) { var rn = String(Wt.get(r, 'World')).split(/\s+/).pop(); return tpNorm_(rn) === q || String(Wt.get(r, 'Orbit')) === String(text).trim() || tpNorm_('orbit ' + Wt.get(r, 'Orbit')) === q; })[0];
+}
+/** "<world> @ <system>", or a world named alone if its name is unique. */
+function tpWorldAt_(world, text) {
+  var at = String(text).match(/^(.*?)\s*@\s*(.+)$/), Wt = world.worldsTab;
+  if (at) { var s = world.findSystem(at[2]); if (!s) return { error: 'System not found: "' + at[2] + '"' }; var r = tpFindWorldRow_(world, s.id, at[1]); return r == null ? { error: 'No world "' + at[1] + '" in ' + tpSysLabel_(s) } : { sys: s, row: r }; }
+  var hit = Wt.rows().filter(function (r) { return tpNorm_(Wt.get(r, 'World')) === tpNorm_(text); });
+  if (hit.length === 1) return { sys: world.sys(Wt.get(hit[0], 'System ID')), row: hit[0] };
+  return { error: 'World not found: "' + text + '" (write <world> @ <system>)' };
+}
+
+// ---------- SETTLE <world> @ <system> ----------
+// Opens a further habitable world in a held system: half a colony's cost, 0.3 bn settlers from that system's own worlds.
+function tpEvSettle_(world, sim, args) {
+  var f = tpWorldAt_(world, String(args).replace(/^\s*(?:the\s+)?world\s+/i, ''));
+  if (f.error) return tpRuling_(f.error, 'The script cannot find this world', 'Identify the world and system.');
+  var Wt = world.worldsTab, sys = f.sys, wn = Wt.get(f.row, 'World');
+  if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
+  if (String(Wt.get(f.row, 'Habitable')) !== 'Yes') return tpReject_(wn + ' is not habitable');
+  if (String(Wt.get(f.row, 'Settled')) === 'Yes') return tpReject_(wn + ' is already settled');
+  if (sim.stability <= TURN_CONFIG.UNREST_AT_OR_BELOW) return tpReject_('No settlement in Unrest or worse (Stability ' + sim.stability + ')');
+  sim.settledIn = sim.settledIn || {};
+  if (sim.settledIn[sys.id]) return tpReject_('One world a turn may be settled in a system');
+  var env = String(Wt.get(f.row, 'Environment'));
+  var col = env === 'Oceanic' ? 'Colony cost: Oceanic world' : env === 'Garden' ? 'Colony cost: Garden world' :
+    (['Barren', 'Frozen', 'Arid', 'Volcanic', 'Toxic'].indexOf(env) >= 0 ? 'Colony cost: Barren, Frozen, Arid, Volcanic or Toxic world' : '');
+  if (!col) return tpRuling_('No settlement cost for environment "' + env + '"', 'Priced like a colony of its environment', 'Price it.');
+  var c = Math.ceil(tpNum_(sim.calc[col]) * TURN_CONFIG.SETTLE_COST_X);
+  var pop = world.systemPopulation(sys.id) - (sim.settlersFrom[sys.id] || 0);
+  if (pop < TURN_CONFIG.COLONY_SETTLERS_BN * 2) return tpReject_(tpSysLabel_(sys) + ' holds ' + tpRound2_(pop) + ' bn: too few to send ' + TURN_CONFIG.COLONY_SETTLERS_BN + ' bn settlers');
+  return tpReady_(wn + ' (' + env + ') in ' + tpSysLabel_(sys) + ' settled; ' + TURN_CONFIG.COLONY_SETTLERS_BN + ' bn settlers from the system',
+    'Half a colony\'s cost (' + env + '): ' + c + ' Influence and ' + c + ' Energy; its carrying capacity counts in full from next turn',
+    { Influence: c, Energy: c }, {}, { type: 'SETTLE', sys: sys.id, row: f.row, bn: TURN_CONFIG.COLONY_SETTLERS_BN });
+}
+
+// ---------- RESETTLE <n> [bn] FROM <world> TO <world> [@ <system>] ----------
+// Free: moves people between settled worlds of one held system, at most 10% of the source world a turn.
+function tpEvResettle_(world, sim, args) {
+  var m = String(args).match(/^([\d.]+)\s*(?:bn|billion)?\s+(?:people\s+)?from\s+(.+?)\s+to\s+(.+?)(?:\s*@\s*(.+))?\s*\.?$/i);
+  if (!m) return tpRuling_('Write RESETTLE <n> bn FROM <world> TO <world> @ <system>', 'Order not understood', 'Identify the amount and the worlds.');
+  var bn = Number(m[1]), sysTxt = m[4];
+  var a = tpWorldAt_(world, sysTxt ? m[2] + ' @ ' + sysTxt : m[2]), b = tpWorldAt_(world, sysTxt ? m[3] + ' @ ' + sysTxt : m[3]);
+  if (a.error || b.error) return tpRuling_(a.error || b.error, 'The script cannot find this world', 'Identify the worlds.');
+  if (a.sys.id !== b.sys.id) return tpReject_('Resettlement is within one system; between systems, people move by migration');
+  if (!sim.ownsActive(a.sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(a.sys));
+  var Wt = world.worldsTab;
+  if (String(Wt.get(b.row, 'Settled')) !== 'Yes') return tpReject_(Wt.get(b.row, 'World') + ' is not settled: SETTLE it first');
+  var have = tpNum_(Wt.get(a.row, 'Population (bn)')), max = tpRound3_(have * TURN_CONFIG.RESETTLE_MAX_SHARE);
+  if (!(bn > 0)) return tpReject_('Name an amount above zero');
+  if (bn > max + 1e-9) return tpReject_('At most 10% of ' + Wt.get(a.row, 'World') + ' a turn: ' + max + ' bn of ' + have);
+  return tpReady_(bn + ' bn from ' + Wt.get(a.row, 'World') + ' to ' + Wt.get(b.row, 'World') + ' in ' + tpSysLabel_(a.sys), 'Free',
+    {}, {}, { type: 'RESETTLE', sys: a.sys.id, from: a.row, to: b.row, bn: bn });
+}
+
 // ---------- NAME <system> AS <name>  |  NAME <world> @ <system> AS <name> ----------
 // Free. A nation names the systems it holds and the worlds within them (designer, Turn 36).
 function tpEvName_(world, sim, args) {
@@ -2087,6 +2149,7 @@ function tpCommitSim_(sim, ev) {
     case 'GROUND': sim.armyCapAdded += ev.armyAdd || 0; if (sp.site) { sim.trained = sim.trained || {}; sim.trained[sp.site] = (sim.trained[sp.site] || 0) + (ev.armyAdd || 0); } break;
     case 'DEFENCE': sim.staticAdded[sp.sys] = (sim.staticAdded[sp.sys] || 0) + (sp.points || 0); break;
     case 'RESEARCH': sim.researched[sp.branch] = sp.tier; break;
+    case 'SETTLE': sim.settledIn = sim.settledIn || {}; sim.settledIn[sp.sys] = true; sim.settlersFrom[sp.sys] = (sim.settlersFrom[sp.sys] || 0) + (sp.bn || 0); break;
     case 'COLONIZE': sim.owned[sp.sys] = true; sim.colonized[sp.sys] = true; sim.taken[sp.sys] = true; sim.settlersOut += TURN_CONFIG.COLONY_SETTLERS_BN; if (sp.desig) sim.desigNow[sp.sys] = sp.desig; sim.colonyCount++; break;
     case 'DISMANTLE':
       (sim.dismantled[sp.sys] = sim.dismantled[sp.sys] || []).push(sp.building);
@@ -2563,6 +2626,24 @@ tpResolver_.prototype.apply = function (a, sp, ev) {
       this.log('Spending', n, 'Reform', 'Government now ' + sp.gov + '; check the Fiscal tab for lines out of bounds', 'Yes', a.actionNo);
       break;
     case 'STABILITY': case 'CHARGE_ONLY': case 'STAB_ONLY': break;
+    case 'SETTLE': {
+      var Ws = w.worldsTab, fromS = w.worldRows(sp.sys).filter(function (r) { return Ws.get(r, 'Settled') === 'Yes' && tpNum_(Ws.get(r, 'Population (bn)')) > 0; })
+        .sort(function (a, b) { return tpNum_(Ws.get(b, 'Population (bn)')) - tpNum_(Ws.get(a, 'Population (bn)')); })[0];
+      if (fromS == null) { this.log('Spending', n, 'Settle failed', 'No peopled world in ' + w.label(sp.sys) + ' to send settlers from', 'Yes', a.actionNo); break; }
+      var take = Math.min(sp.bn, tpNum_(Ws.get(fromS, 'Population (bn)')));
+      Ws.set(fromS, 'Population (bn)', tpRound3_(tpNum_(Ws.get(fromS, 'Population (bn)')) - take));
+      Ws.set(sp.row, 'Settled', 'Yes'); Ws.set(sp.row, 'Population (bn)', tpRound3_(tpNum_(Ws.get(sp.row, 'Population (bn)')) + take));
+      this.log('Spending', n, 'Settled', Ws.get(sp.row, 'World') + ' in ' + w.label(sp.sys) + ' settled: ' + take + ' bn from ' + Ws.get(fromS, 'World'), 'No', a.actionNo);
+      break;
+    }
+    case 'RESETTLE': {
+      var Wr = w.worldsTab, have = tpNum_(Wr.get(sp.from, 'Population (bn)')), mv = Math.min(sp.bn, tpRound3_(have * TURN_CONFIG.RESETTLE_MAX_SHARE));
+      if (mv <= 0) break;
+      Wr.set(sp.from, 'Population (bn)', tpRound3_(have - mv));
+      Wr.set(sp.to, 'Population (bn)', tpRound3_(tpNum_(Wr.get(sp.to, 'Population (bn)')) + mv));
+      this.log('Spending', n, 'Resettled', mv + ' bn from ' + Wr.get(sp.from, 'World') + ' to ' + Wr.get(sp.to, 'World') + ' in ' + w.label(sp.sys), 'No', a.actionNo);
+      break;
+    }
     case 'NAME':
       if (sp.kind === 'system') {
         w.sys(sp.sys).set('Name', sp.name);
@@ -2977,7 +3058,7 @@ tpResolver_.prototype.phaseSettlement = function () {
       excess: /^y/i.test(String(P.get(r, 'Take whole excess'))), reason: String(P.get(r, 'Reason') || '') };
   });
   var dflt = policy.ALL || { threshold: w.popConst('Overcrowding threshold (x capacity)', 1.05), share: w.popConst('Migration within a nation % a turn', 3), excess: false, reason: 'Migration within a nation' };
-  function mainRows(sid) { return w.worldRows(sid).filter(function (r) { return String(Wt.get(r, 'Habitable')) === 'Yes'; }); }
+  function mainRows(sid) { var h = w.worldRows(sid).filter(function (r) { return String(Wt.get(r, 'Habitable')) === 'Yes'; }), st = h.filter(function (r) { return String(Wt.get(r, 'Settled')) === 'Yes'; }); return st.length ? st : h; }
   w.activeNations().forEach(function (n) {
     var pol = policy[n.id] || dflt;
     if (!pol.share && !pol.excess) return;
@@ -3698,7 +3779,9 @@ tpWorld_.prototype.moveSettlers = function (nid, toSys, amount) {
     Wt.set(x[0], 'Population (bn)', np);
     parts.push(Wt.get(x[0], 'World') + ' ' + x[1] + ' -> ' + np);
   });
-  var dest = this.worldRows(toSys).filter(function (r) { return String(Wt.get(r, 'Habitable')) === 'Yes'; })[0];
+  var habR = this.worldRows(toSys).filter(function (r) { return String(Wt.get(r, 'Habitable')) === 'Yes'; }), envS = String((this.sys(toSys) || { get: function () { return ''; } }).get('Environment'));
+  // a settled world first; else the main world (its environment is the system's); else the first habitable world
+  var dest = habR.filter(function (r) { return String(Wt.get(r, 'Settled')) === 'Yes'; })[0] || habR.filter(function (r) { return String(Wt.get(r, 'Environment')) === envS; })[0] || habR[0];
   var S = this.sys(toSys);
   if (dest) {
     Wt.set(dest, 'Population (bn)', tpRound3_(tpNum_(Wt.get(dest, 'Population (bn)')) + amount));
