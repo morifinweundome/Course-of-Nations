@@ -563,7 +563,7 @@ function worksSection(s) {
     ${ground.length ? `<div class="wks">${chips(ground)}</div>` : '<p class="wnote" style="margin:4px 0 0">No buildings yet.</p>'}
     ${orb.length ? `<div class="wks"><span class="ok">In orbit</span>${chips(orb)}</div>` : ''}
     ${o.wip ? `<div class="wks"><span class="ok">Under way</span>${chips(o.wip)}</div>` : ''}
-    <p class="wnote">Orbital works take an orbital slot: one per system, two from Development 4. Each building stands once per system.</p></div>`;
+    <p class="wnote">A system has one building slot per Development level. Orbital works take an orbital slot: one per system, two from Development 4. Foundries, Power Plants, Research Institutes, Civic Halls, Barracks and Vehicle Factories may stand more than once; every other building once per system.</p></div>`;
 }
 function worldTip(w) {
   const row = (k, v) => v ? `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>` : '';

@@ -503,12 +503,17 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   // Buildings in the rules that the price list does not carry.
   var BK_EXTRA = [
     { Item: 'Military College', Industry: '15', Strategic: '', Requires: 'Military Tier 2; takes 2 turns; once per nation', once: 'nation' },
+    { Item: 'Barracks', Industry: '10', Strategic: '', Requires: '' },
+    { Item: 'Vehicle Factory', Industry: '15', Strategic: '', Requires: 'Military Tier 2' },
     { Item: 'Habitat Station', Industry: '12', Strategic: '', Requires: 'Society Tier 2; orbital, takes an orbital slot', orbital: true },
     { Item: 'Arcology', Industry: '20', Strategic: '1 Lattice crystals', Requires: 'Industry Tier 4; Development 3; takes 2 turns' },
     { Item: 'Planetary Shield', Industry: '20', Strategic: '2 Lattice crystals', Requires: 'Military Tier 4; takes 2 turns' },
     { Item: 'Orbital Fortress', Industry: '25', Strategic: '2 Adamant ore', Requires: 'Military Tier 3; orbital, takes an orbital slot; takes 2 turns', orbital: true },
     { Item: 'Gravity Well Generator', Industry: '20', Strategic: '2 Antimatter; 1 Lattice crystals', Requires: 'Logistics Tier 4; orbital, takes an orbital slot; takes 2 turns', orbital: true }
   ];
+  // Buildings that may stand more than once in a system; a further yield building yields half.
+  var BK_STACK = ['Foundry', 'Power Plant', 'Research Institute', 'Civic Hall', 'Barracks', 'Vehicle Factory'];
+  var BK_SITE = { 'Infantry': 'Barracks', 'Specialised Infantry': 'Barracks', 'Special Forces': 'Barracks', 'Armour': 'Vehicle Factory', 'Heavy Armour': 'Vehicle Factory', 'Artillery': 'Vehicle Factory', 'Heavy Artillery': 'Vehicle Factory' };
   var BK_VERBS = [
     ['BUILD', 'Build'], ['DEVELOP', 'Develop'], ['DESIGNATE', 'Designate'], ['RESEARCH', 'Research'], ['COLONIZE', 'Colonize'],
     ['SHIP', 'Ships'], ['GROUND', 'Ground forces'], ['DEFENCE', 'Static Defence'], ['MOVE', 'Move a force'], ['STABILITY', 'Buy Stability']
@@ -551,19 +556,21 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         out.text = 'BUILD ' + name + ' @ ' + s['System ID'];
         out.cost.Industry = num(b.Industry); out.strat = bkStratParse(b.Strategic);
         var have = String(s['Buildings'] || '').split(/\s*,\s*/).filter(Boolean);
-        var dupBasket = others.some(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && x.what === r.what && (r.what !== 'Extractor' || x.res === r.res); });
+        var stack = BK_STACK.indexOf(b.Item) >= 0;
+        var dupBasket = !stack && others.some(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && x.what === r.what && (r.what !== 'Extractor' || x.res === r.res); });
         if (b.locked) bad('Not yet unlocked: ' + (b.Requires || 'requirements not met') + '.');
         else if (r.what === 'Extractor') {
           if (r.res && have.indexOf('Extractor (' + r.res + ')') >= 0) bad('An Extractor already works that deposit here.');
           else if (dupBasket) bad('Already in your basket.');
-        } else if (have.some(function (h) { return h === b.Item || h.replace(/\s*\(.*\)\s*$/, '') === b.Item; }) || dupBasket) bad(b.Item + ' already stands (or is ordered) in ' + s['System ID'] + '; once per system.');
+        } else if (!stack && have.some(function (h) { return h === b.Item || h.replace(/\s*\(.*\)\s*$/, '') === b.Item; }) || dupBasket) bad(b.Item + ' already stands (or is ordered) in ' + s['System ID'] + '; once per system.');
         if (!out.cls && b.once === 'nation' && (BK.sys.some(function (x) { return String(x['Buildings']).indexOf(b.Item) >= 0; }) || others.some(function (x) { return x.verb === 'BUILD' && x.what === b.Item; })))
           bad(b.Item + ' counts once per nation, and you already hold one.');
         if (!out.cls && !b.orbital) {
           var used = num(s['Slots used']) + others.filter(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && !(bkBuildings().filter(function (y) { return y.Item === x.what; })[0] || {}).orbital; }).length;
           var free = num(s['Slots']) - used;
           if (free < 1) bad('No free building slot in ' + s['System ID'] + ' (' + num(s['Slots used']) + ' of ' + num(s['Slots']) + ' used' + (used > num(s['Slots used']) ? ', plus orders in this basket' : '') + ').');
-          else out.msg = (free - 1) + ' slot' + (free - 1 === 1 ? '' : 's') + ' left in ' + s['System ID'] + ' after this.';
+          else out.msg = (free - 1) + ' slot' + (free - 1 === 1 ? '' : 's') + ' left in ' + s['System ID'] + ' after this (one slot per Development level).' +
+            (stack && /^(Foundry|Power Plant|Research Institute|Civic Hall)$/.test(b.Item) && (have.indexOf(b.Item) >= 0 || others.some(function (x) { return x.verb === 'BUILD' && x.sys === r.sys && x.what === b.Item; })) ? ' A further ' + b.Item + ' yields half.' : '');
         }
         if (!out.cls && b.orbital) {
           var isOrb = function (name) { var y = bkBuildings().filter(function (z) { return z.Item === String(name).replace(/\s*\(.*\)\s*$/, ''); })[0]; return !!(y && y.orbital); };
@@ -637,6 +644,17 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         if (p2['Unlocked'] === 'No') bad('Not yet unlocked: ' + (p2['Requires'] || '') + '.');
         else if (r.verb === 'SHIP' && String(s3['Buildings']).indexOf('Shipyard') < 0) bad('Ships may be built only at a system with a Shipyard.');
         else if (r.verb === 'SHIP' && /Battleship|Dreadnought/.test(r.what) && num(s3['Development']) < 3) bad(r.what + 's need a Shipyard at Development 3 or more.');
+        else if (r.verb === 'GROUND' && BK_SITE[r.what] && String(s3['Buildings']).indexOf(BK_SITE[r.what]) < 0) {
+          if (r.what === 'Infantry') note('No Barracks at ' + s3['System ID'] + ': Infantry may be mustered there only while it is under attack, at double cost.');
+          else bad(r.what + ' is raised at a ' + BK_SITE[r.what] + '; ' + s3['System ID'] + ' has none.');
+        }
+        else if (r.verb === 'GROUND' && BK_SITE[r.what]) {
+          var nSite = String(s3['Buildings']).split(/\s*,\s*/).filter(function (x) { return x === BK_SITE[r.what]; }).length, room = nSite * 2 * num(s3['Development']);
+          var capU = num((String(p2['Note'] || '').match(/capacity ([\d.]+)/) || [])[1]) || 1;
+          var inBasket = others.filter(function (x) { return x.verb === 'GROUND' && x.sys === r.sys && BK_SITE[x.what] === BK_SITE[r.what]; }).reduce(function (t, x) { var px = bkPriceRow('Ground formations', x.what); return t + (num((String((px || {})['Note'] || '').match(/capacity ([\d.]+)/) || [])[1]) || 1) * Math.max(1, Math.round(num(x.qty) || 1)); }, 0);
+          if (capU * q + inBasket > room) bad(s3['System ID'] + '\'s ' + BK_SITE[r.what] + (nSite > 1 ? ' (' + nSite + ')' : '') + ' trains up to ' + room + ' capacity a turn (2 per Development level each); this order and your basket need ' + (capU * q + inBasket) + '.');
+          else { out.msg = (p2['Note'] || '') + ' · ' + (room - inBasket - capU * q) + ' training capacity left there this turn'; out.cls = 'ok'; }
+        }
         else { out.msg = (p2['Note'] || '') + ' · estimate before your fiscal discounts'; out.cls = 'ok'; }
         break;
       }
@@ -1044,16 +1062,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     var stab = num(kv('Stability')), tgt = num(kv('Stability target'));
     var adm = num(kv('Administrative Capacity')), over = num(kv('Capacity over'));
     var fcap = num(kv('Fleet Capacity')), fuse = num(kv('Ship capacity used'));
-    var acap = num(kv('Army Capacity')), gp = num(kv('Ground Power'));
+    var gp = num(kv('Ground Power')), muse = fuse + gp;
     var v = [];
     v.push('<div class="vc"><div class="t">' + ico('Stability') + 'Stability</div><div class="v">' + fmt(stab) + ' <small>drifting toward ' + fmt(tgt) + '</small></div>' +
       meter(stab, 20, { mark: tgt }) + '<div class="s">' + (stab < tgt ? 'Rising' : stab > tgt ? 'Falling' : 'Steady') + ' by one a turn toward its target</div></div>');
     v.push('<div class="vc"><div class="t">' + ico('Development') + 'Administrative Capacity</div><div class="v">' + fmt(adm) + '</div>' +
       '<div class="s">' + (over > 0 ? '<span class="pill no">' + fmt(over) + ' over capacity</span>' : 'Within capacity') + ' · ' + esc(kv('Systems held') || 0) + ' systems held</div></div>');
-    v.push('<div class="vc"><div class="t">' + ico('Fleet Power') + 'Fleet</div><div class="v">' + fmt(fuse) + ' <small>of ' + fmt(fcap) + ' capacity</small></div>' +
-      meter(fuse, fcap, { hot: fuse > fcap }) + '<div class="s">Fleet Power ' + fmt(num(kv('Fleet Power'))) + '</div></div>');
-    v.push('<div class="vc"><div class="t">' + ico('Ground Power') + 'Army</div><div class="v">' + fmt(gp) + ' <small>of ' + fmt(acap) + ' capacity</small></div>' +
-      meter(gp, acap, { hot: gp > acap }) + '<div class="s">Ground Power</div></div>');
+    v.push('<div class="vc"><div class="t">' + ico('Fleet Power') + 'Military Capacity</div><div class="v">' + fmt(muse) + ' <small>of ' + fmt(fcap) + '</small></div>' +
+      meter(muse, fcap, { hot: muse > fcap }) + '<div class="s">Ships ' + fmt(fuse) + ' · ground formations ' + fmt(gp) + ' · Fleet Power ' + fmt(num(kv('Fleet Power'))) + '</div></div>');
     v.push('<div class="vc"><div class="t">' + ico('Population') + 'Population</div><div class="v">' + fmt(num(kv('Population (bn)'))) + ' <small>billion</small></div>' +
       '<div class="s">Workforce needed ' + fmt(num(kv('Workforce needed (bn)'))) + ' bn</div></div>');
     v.push('<div class="vc"><div class="t">' + ico('Stellar Mark') + 'Economy</div><div class="v">' + fmt(num(kv('GDP (SM)'))) + ' <small>SM GDP</small></div>' +
@@ -1327,8 +1343,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     };
     $('#headroom').innerHTML =
       card('Development', 'Administrative Capacity', adm - held, adm, 'more systems before penalties') +
-      card('Fleet Power', 'Fleet capacity', num(kv('Fleet Capacity')) - num(kv('Ship capacity used')), num(kv('Fleet Capacity')), 'capacity free') +
-      card('Ground Power', 'Army capacity', num(kv('Army Capacity')) - num(kv('Ground Power')), num(kv('Army Capacity')), 'capacity free') +
+      card('Fleet Power', 'Military capacity', num(kv('Fleet Capacity')) - num(kv('Ship capacity used')) - num(kv('Ground Power')), num(kv('Fleet Capacity')), 'capacity free for ships or formations') +
       card('Stellar Mark', 'Trade slots', num(kv('Trade slots')) - num(kv('Trade agreements')), num(kv('Trade slots')), 'agreements free') +
       card('Industry', 'Building slots', slots, null, 'free across ' + sys.length + ' system' + (sys.length === 1 ? '' : 's'));
   }
@@ -1353,7 +1368,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     if (next <= 3) w.push(['bad', 'Stability will be ' + next + ' next turn (' + (next <= 1 ? 'Crisis' : 'Unrest') + ').']);
     stockRows.forEach(function (r) { if (num(r['Projected']) < 0) w.push(['bad', esc(r['Resource']) + ' would run short this turn: projected ' + fmt(num(r['Projected'])) + '.']); });
     if (num(kv('Capacity over')) > 0) w.push(['bad', 'Over Administrative Capacity by ' + fmt(num(kv('Capacity over'))) + '.']);
-    if (num(kv('Ship capacity used')) > num(kv('Fleet Capacity'))) w.push(['bad', 'Fleet over capacity: the excess is lost at the end of the turn, smallest ships first.']);
+    if (num(kv('Ship capacity used')) + num(kv('Ground Power')) > num(kv('Fleet Capacity'))) w.push(['bad', 'Over Military Capacity: the excess is lost at the end of the turn, smallest units first.']);
     sys.forEach(function (s) {
       var pop = num(s['Population (bn)']), cap = num(s['Carrying capacity (bn)']), g = num(s['Growth due (bn)']), nm = esc(s['Name'] || s['System ID']);
       if (/yes|true/i.test(s['Overcrowded'] || '')) w.push(['bad', nm + ' is overcrowded: Stability suffers until it is relieved.']);

@@ -251,6 +251,7 @@ function pfRecord_(W, n) {
     ['Administrative Capacity', c.get('Administrative Capacity')], ['Capacity over', c.get('Capacity over')],
     ['Fleet Capacity', c.get('Fleet Capacity')], ['Ship capacity used', c.get('Ship capacity used')],
     ['Fleet Power', c.get('Fleet Power')], ['Ground Power', c.get('Ground Power')], ['Army Capacity', c.get('Army Capacity')],
+    ['Military Capacity', c.get('Fleet Capacity')], ['Military capacity used', pfRound_(c.num('Ship capacity used') + c.num('Ground Power'))],
     ['Population (bn)', c.get('Population (bn)')], ['Workforce needed (bn)', c.get('Workforce needed (bn)')],
     ['GDP (SM)', c.get('GDP (SM)')], ['Revenue (SM)', c.get('Revenue (SM)')], ['Debt (SM)', c.get('Debt (SM)')],
     ['Credit rating', c.get('Credit rating')], ['Bond rate %', c.get('Bond rate %')],
@@ -401,10 +402,10 @@ function pfWrite_(ss, rec) {
 
 var PF_TECH_STRAT = { Military: 'Antimatter', Industry: 'Lattice crystals', Society: 'Lattice crystals', Logistics: 'Volatile isotopes' };
 var PF_GROUND = [   // Formation, Industry, strategic, requires, wages (Marks), capacity
-  ['Infantry', 2, '', '', 0.25, 1], ['Specialised Infantry', 4, '', 'Military Tier 2', 0.4, 1],
-  ['Armour', 7, '1 Adamant ore', 'Military Tier 2', 0.75, 2], ['Heavy Armour', 16, '2 Adamant ore; 1 Lattice crystals', 'Military Tier 4', 1.5, 4],
-  ['Artillery', 5, '', 'Military Tier 2', 0.5, 2], ['Heavy Artillery', 14, '1 Adamant ore; 1 Antimatter', 'Military Tier 4', 1, 4],
-  ['Special Forces', 6, '', 'Military Tier 3; a Military College', 0.5, 1]];
+  ['Infantry', 2, '', 'a Barracks', 0.25, 1], ['Specialised Infantry', 4, '', 'Military Tier 2; a Barracks', 0.4, 1],
+  ['Armour', 7, '1 Adamant ore', 'Military Tier 2; a Vehicle Factory', 0.75, 2], ['Heavy Armour', 16, '2 Adamant ore; 1 Lattice crystals', 'Military Tier 4; a Vehicle Factory', 1.5, 4],
+  ['Artillery', 5, '', 'Military Tier 2; a Vehicle Factory', 0.5, 2], ['Heavy Artillery', 14, '1 Adamant ore; 1 Antimatter', 'Military Tier 4; a Vehicle Factory', 1, 4],
+  ['Special Forces', 6, '', 'Military Tier 3; a Military College; a Barracks', 0.5, 1]];
 
 /** A block of the Tables tab that starts with a title row and a header row. */
 function pfBlock_(T, title) {

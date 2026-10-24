@@ -231,12 +231,23 @@ var TURN_CONFIG = {
   // Buildings the rules list that Tables!T_BUILD does not. T_BUILD wins where both exist.
   RULE_BUILDINGS: {
     'Military College':       { industry: 15, strat: {}, req: { military: 2 }, turns: 2, slot: true },
+    'Barracks':               { industry: 10, strat: {}, req: {}, turns: 1, slot: true },
+    'Vehicle Factory':        { industry: 15, strat: {}, req: { military: 2 }, turns: 1, slot: true },
     'Habitat Station':        { industry: 12, strat: {}, req: { society: 2 }, turns: 1, slot: false, orbital: true },  // orbital: takes no planetary slot (ruling, Turn 26)
     'Arcology':               { industry: 20, strat: { 'Lattice crystals': 1 }, req: { industry: 4, development: 3 }, turns: 2, slot: true },
     'Planetary Shield':       { industry: 20, strat: { 'Lattice crystals': 2 }, req: { military: 4 }, turns: 2, slot: true, installation: true },
     'Orbital Fortress':       { industry: 25, strat: { 'Adamant ore': 2 }, req: { military: 3 }, turns: 2, slot: false, orbital: true, installation: true },  // orbital slot (designer, Turn 35)
     'Gravity Well Generator': { industry: 20, strat: { 'Antimatter': 2, 'Lattice crystals': 1 }, req: { logistics: 4 }, turns: 2, slot: false, orbital: true, installation: true }  // orbital slot (designer, Turn 35)
   },
+  // Buildings that may stand more than once in a system (designer, Turn 36). Each copy of a yield building
+  // after the first yields half (Systems formulas); each Barracks or Vehicle Factory adds its own training.
+  STACKABLE: ['Foundry', 'Power Plant', 'Research Institute', 'Civic Hall', 'Barracks', 'Vehicle Factory'],
+  // Ground formations are raised at a Barracks (infantry of every kind) or a Vehicle Factory (designer, Turn 36).
+  // Each copy trains up to TRAIN_PER_DEV x the world's Development in capacity a turn.
+  // A world under attack may muster Infantry without one, at MUSTER_COST_X the cost.
+  FORMATION_SITE: { 'Infantry': 'Barracks', 'Specialised Infantry': 'Barracks', 'Special Forces': 'Barracks',
+    'Armour': 'Vehicle Factory', 'Heavy Armour': 'Vehicle Factory', 'Artillery': 'Vehicle Factory', 'Heavy Artillery': 'Vehicle Factory' },
+  TRAIN_PER_DEV: 2, MUSTER_COST_X: 2,
   TWO_TURN_BUILDINGS: ['Military College', 'Arcology', 'Planetary Shield', 'Orbital Fortress', 'Gravity Well Generator'],
   // Signature works (rules, Partnerships): need the habitat's expertise.
   SIGNATURE_WORKS: {
@@ -935,9 +946,10 @@ function tpEvBuild_(world, sim, args) {
   var ub = world.unlockedBuilding(sim.nid, name);
   if (ub && ub.error) return tpReject_(ub.error);
   if (ub) return tpBuildChecks_(world, sim, sys, ub, depositWanted);
-  var b = world.building(name);
+  var b = world.building(name), copies = 1;
+  if (!b) { var bq = tpParseQty_(name); if (bq.n > 1 && world.building(bq.name)) { b = world.building(bq.name); copies = bq.n; } }
   if (!b) return tpRuling_('Building not recognised: "' + name + '"', 'Not in Tables or the rules', 'Identify the building or treat as lore.');
-  return tpBuildChecks_(world, sim, sys, b, depositWanted);
+  return tpBuildChecks_(world, sim, sys, b, depositWanted, copies);
 }
 
 // Extractors: one per deposit, not one per system (ruling, Turn 26). Each is recorded
@@ -963,13 +975,16 @@ function tpExtractorPlan_(sys, existing, wanted) {
   return { deposit: free[0], note: free.length > 1 ? 'works the ' + free[0] + ' deposit (name another in brackets to choose)' : '' };
 }
 
-function tpBuildChecks_(world, sim, sys, b, depositWanted) {
+function tpBuildChecks_(world, sim, sys, b, depositWanted, copies) {
   var existing = sim.buildingsOf(sys.id);
   var isExtractor = tpNorm_(b.name) === 'extractor', plan = null;
+  var stackable = TURN_CONFIG.STACKABLE.some(function (x) { return tpNorm_(x) === tpNorm_(b.name); });
+  copies = copies || 1;
+  if (copies > 1 && (!stackable || (b.turns || 1) > 1)) return tpReject_(b.name + ' may stand only once in a system');
   if (isExtractor) {
     plan = tpExtractorPlan_(sys, existing, depositWanted);
     if (plan.error) return tpReject_(plan.error);
-  } else if (existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name) || tpNorm_(String(x).replace(/\s*\(.*\)\s*$/, '')) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
+  } else if (!stackable && existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name) || tpNorm_(String(x).replace(/\s*\(.*\)\s*$/, '')) === tpNorm_(b.name); })) return tpReject_(b.name + ' already stands (or is ordered) in ' + tpSysLabel_(sys) + '; once per system');
   var r = b.req || {};
   var tiers = sim.tiers;
   if (r.military && tiers.Military < r.military) return tpReject_('Requires Military Tier ' + r.military);
@@ -982,7 +997,7 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted) {
   if (r.deposit && !isExtractor && !String(sys.get('Deposits') || '').trim()) return tpReject_('Requires a strategic deposit in the system');
   if (r.unknown) return tpRuling_('Requirement the script cannot read: ' + r.unknown, 'Unreadable requirement in Tables', 'Check the requirement.');
   var free = tpNum_(sys.get('Slots')) - tpNum_(sys.get('Slots used')) - (sim.slotsAdded[sys.id] || 0);
-  if (b.slot !== false && free < 1) return tpReject_('No free building slot in ' + tpSysLabel_(sys));
+  if (b.slot !== false && free < copies) return tpReject_((copies > 1 ? 'Not enough free building slots in ' + tpSysLabel_(sys) + ' for ' + copies + ' (' + Math.max(0, free) + ' free)' : 'No free building slot in ' + tpSysLabel_(sys)) + '; a system has one slot per Development level');
   if (b.orbital) {
     var hostO = world.hostileSpace(sim.nid, sys.id);
     if (hostO) return tpReject_('Hostile forces hold ' + tpSysLabel_(sys) + '\'s space (' + hostO + '): no orbital construction until they are driven off');
@@ -992,16 +1007,18 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted) {
     if (oUsed >= oSlots) return tpReject_('No free orbital slot in ' + tpSysLabel_(sys) + ' (' + oUsed + ' of ' + oSlots + ' used; one more opens at Development 4)');
   }
   var ex = sim.calc['Extractor cost (Industry)'];
-  var industry = b.name === 'Extractor' && ex !== '' && ex !== undefined && ex !== null ? tpNum_(ex) : b.industry;
+  var industry = (b.name === 'Extractor' && ex !== '' && ex !== undefined && ex !== null ? tpNum_(ex) : b.industry) * copies;
   var notes = [];
+  if (stackable && /^(Foundry|Power Plant|Research Institute|Civic Hall)$/.test(b.name) && existing.some(function (x) { return tpNorm_(x) === tpNorm_(b.name); })) notes.push('a further copy yields half');
   if (b.oncePerNation && sim.nationHasBuilding(b.name)) notes.push('counts once per nation: no further effect');
   if (b.orbital) notes.push('orbital: takes an orbital slot, not a building slot');
   var built = isExtractor ? 'Extractor (' + plan.deposit + ')' : (b.builtName || b.name);
   if (plan && plan.note) notes.push(plan.note);
   var turns = b.turns || 1;
-  return tpReady_(built + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : ''),
-    'Cost ' + industry + ' Industry' + (tpStratText_(b.strat) ? ' and ' + tpStratText_(b.strat) : '') + (notes.length ? '; ' + notes.join('; ') : ''),
-    { Industry: industry }, b.strat || {}, { type: 'BUILD', sys: sys.id, building: built, turns: turns, orbital: !!b.orbital });
+  var bstrat = {}; Object.keys(b.strat || {}).forEach(function (k) { bstrat[k] = b.strat[k] * copies; });
+  return tpReady_((copies > 1 ? copies + ' x ' : '') + built + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : ''),
+    'Cost ' + industry + ' Industry' + (tpStratText_(bstrat) ? ' and ' + tpStratText_(bstrat) : '') + (notes.length ? '; ' + notes.join('; ') : ''),
+    { Industry: industry }, bstrat, { type: 'BUILD', sys: sys.id, building: built, turns: turns, orbital: !!b.orbital, copies: copies });
 }
 
 function tpEvSignatureWork_(world, sim, sys, name) {
@@ -1035,9 +1052,10 @@ function tpEvShip_(world, sim, args) {
   var sd = req.match(/Shipyard Dev (\d)/i);
   if (sd && tpNum_(sys.get('Development')) < Number(sd[1])) return tpReject_('Requires a Shipyard at Development ' + sd[1] + ' or more');
   var capAdd = cat.capacity * q.n;
-  var used = tpNum_(sim.calc['Ship capacity used']) + sim.shipCapAdded;
+  // Military Capacity (designer, Turn 36): ships and ground formations share one pool (Calculations "Fleet Capacity").
+  var used = tpNum_(sim.calc['Ship capacity used']) + tpNum_(sim.calc['Ground Power']) + sim.shipCapAdded + sim.armyCapAdded;
   var fc = tpNum_(sim.calc['Fleet Capacity']);
-  if (used + capAdd > fc) return tpReject_('Over Fleet Capacity: ' + tpRound2_(used) + ' used + ' + capAdd + ' > ' + fc);
+  if (used + capAdd > fc) return tpReject_('Over Military Capacity: ' + tpRound2_(used) + ' used + ' + capAdd + ' > ' + fc);
   var pct = tpNum_(sim.calc['Fiscal ship cost %']) + (sim.hasCivic('Military Junta') ? TURN_CONFIG.MILITARY_JUNTA_SHIP_PCT : 0);
   pct = Math.max(TURN_CONFIG.COST_FLOOR_PCT, pct);
   var base = cat.industry * q.n;
@@ -1070,15 +1088,31 @@ function tpEvGround_(world, sim, args) {
   if (f.needsCollege && !sim.nationHasBuilding('Military College')) return tpReject_('Special Forces need a Military College');
   if (f.needsEnvironment && !env) return tpRuling_('Specialised Infantry needs its environment named', 'Write e.g. GROUND Specialised Infantry (Frozen) x2 @ ...', 'Ask the player for the environment.');
   var capAdd = f.capacity * q.n;
-  var used = tpNum_(sim.calc['Ground Power']) + sim.armyCapAdded;
-  var ac = tpNum_(sim.calc['Army Capacity']);
-  if (used + capAdd > ac) return tpReject_('Over Army Capacity: ' + used + ' + ' + capAdd + ' > ' + ac);
-  var cost = f.industry * q.n;
+  var used = tpNum_(sim.calc['Ship capacity used']) + tpNum_(sim.calc['Ground Power']) + sim.shipCapAdded + sim.armyCapAdded;
+  var ac = tpNum_(sim.calc['Fleet Capacity']);
+  if (used + capAdd > ac) return tpReject_('Over Military Capacity: ' + tpRound2_(used) + ' used + ' + capAdd + ' > ' + ac);
+  // Training sites (designer, Turn 36): a Barracks or a Vehicle Factory at this world, each copy training up to
+  // 2 x Development capacity a turn. A world under attack may muster Infantry without one, at double cost.
+  var site = TURN_CONFIG.FORMATION_SITE[fname], costX = 1, siteNote = '';
+  if (site) {
+    var have = sim.buildingsOf(sys.id).filter(function (x) { return tpNorm_(x) === tpNorm_(site); }).length;
+    var key = sys.id + '|' + site;
+    sim.trained = sim.trained || {};
+    var room = have * TURN_CONFIG.TRAIN_PER_DEV * tpNum_(sys.get('Development')) - (sim.trained[key] || 0);
+    var attacked = world.underAttack(sim.nid, sys.id);
+    if (!have) {
+      if (fname === 'Infantry' && attacked) { costX = TURN_CONFIG.MUSTER_COST_X; siteNote = 'mustered under attack (' + attacked + ') without a Barracks: double cost'; }
+      else return tpReject_(fname + ' is raised at a ' + site + '; ' + tpSysLabel_(sys) + ' has none' + (fname === 'Infantry' ? ' (a world under attack may muster Infantry at double cost)' : ''));
+    } else if (capAdd > room) {
+      return tpReject_(tpSysLabel_(sys) + '\'s ' + (have > 1 ? have + ' ' + site + (site === 'Barracks' ? '' : 's') : site) + ' can train ' + Math.max(0, room) + ' more capacity this turn (' + TURN_CONFIG.TRAIN_PER_DEV + ' x Development each); ' + capAdd + ' ordered');
+    } else siteNote = 'trained at the ' + site + ' (' + (room - capAdd) + ' capacity left there this turn)';
+  }
+  var cost = f.industry * q.n * costX;
   var strat = {};
   Object.keys(f.strat).forEach(function (s) { strat[s] = f.strat[s] * q.n; });
   return tpReady_(q.n + ' ' + fname + (env ? ' (' + env + ')' : '') + ' at ' + tpSysLabel_(sys) + (f.turns > 1 ? ' (' + f.turns + ' turns)' : ''),
-    q.n + ' x ' + f.industry + ' = ' + cost + ' Industry' + (tpStratText_(strat) ? '; ' + tpStratText_(strat) : '') + '; capacity ' + capAdd + ' (' + (used + capAdd) + ' of ' + ac + ')',
-    { Industry: cost }, strat, { type: 'GROUND', sys: sys.id, form: fname, n: q.n, env: env, turns: f.turns }, { armyAdd: capAdd });
+    q.n + ' x ' + f.industry + (costX > 1 ? ' x ' + costX : '') + ' = ' + cost + ' Industry' + (tpStratText_(strat) ? '; ' + tpStratText_(strat) : '') + '; capacity ' + capAdd + ' (' + tpRound2_(used + capAdd) + ' of ' + ac + ' Military Capacity)' + (siteNote ? '; ' + siteNote : ''),
+    { Industry: cost }, strat, { type: 'GROUND', sys: sys.id, form: fname, n: q.n, env: env, turns: f.turns, site: site && costX === 1 ? sys.id + '|' + site : '' }, { armyAdd: capAdd });
 }
 
 // ---------- DEFENCE [Static Defence] <points> @ <system>  |  DEFENCE <installation> @ <system> ----------
@@ -2008,9 +2042,9 @@ function tpCommitSim_(sim, ev) {
   switch (sp.type) {
     case 'DEVELOP': sim.devRaised[sp.sys] = sp.level; break;
     case 'DESIGNATE': sim.desigChanged[sp.sys] = sp.desig; sim.desigNow[sp.sys] = sp.desig; break;
-    case 'BUILD': if (!sp.orbital) sim.slotsAdded[sp.sys] = (sim.slotsAdded[sp.sys] || 0) + 1; (sim.newBuildings[sp.sys] = sim.newBuildings[sp.sys] || []).push(sp.building); break;
+    case 'BUILD': for (var bc = 0; bc < (sp.copies || 1); bc++) { if (!sp.orbital) sim.slotsAdded[sp.sys] = (sim.slotsAdded[sp.sys] || 0) + 1; (sim.newBuildings[sp.sys] = sim.newBuildings[sp.sys] || []).push(sp.building); } break;
     case 'SHIP': sim.shipCapAdded += ev.capAdd || 0; break;
-    case 'GROUND': sim.armyCapAdded += ev.armyAdd || 0; break;
+    case 'GROUND': sim.armyCapAdded += ev.armyAdd || 0; if (sp.site) { sim.trained = sim.trained || {}; sim.trained[sp.site] = (sim.trained[sp.site] || 0) + (ev.armyAdd || 0); } break;
     case 'DEFENCE': sim.staticAdded[sp.sys] = (sim.staticAdded[sp.sys] || 0) + (sp.points || 0); break;
     case 'RESEARCH': sim.researched[sp.branch] = sp.tier; break;
     case 'COLONIZE': sim.owned[sp.sys] = true; sim.colonized[sp.sys] = true; sim.taken[sp.sys] = true; sim.settlersOut += TURN_CONFIG.COLONY_SETTLERS_BN; if (sp.desig) sim.desigNow[sp.sys] = sp.desig; sim.colonyCount++; break;
@@ -2467,7 +2501,7 @@ tpResolver_.prototype.apply = function (a, sp, ev) {
     case 'DESIGNATE': w.sys(sp.sys).set('Designation', sp.desig); this.log('Spending', n, 'Designation', w.label(sp.sys) + ' designated ' + sp.desig, 'No', a.actionNo); break;
     case 'BUILD':
       if ((sp.turns || 1) > 1) this.addWork(n, 'Building', sp.building, sp.sys, turn + sp.turns - 1, a.actionNo);
-      else this.completions.push({ kind: 'Building', nation: n, sys: sp.sys, item: sp.building, row: a.actionNo });
+      else for (var bc = 0; bc < (sp.copies || 1); bc++) this.completions.push({ kind: 'Building', nation: n, sys: sp.sys, item: sp.building, row: a.actionNo });
       break;
     case 'SHIP':
       if ((sp.turns || 1) > 1) this.addWork(n, 'Ships', sp.n + ' ' + sp.cat, sp.sys, turn + sp.turns - 1, a.actionNo);
@@ -2770,7 +2804,7 @@ tpResolver_.prototype.phaseSynthesis = function () {
       var m = bn.match(/^Synthesis Works\s*\(\s*(.+?)\s*\)$/i); if (!m) return;
       var label = tpSysLabel_(s), rc = w.recipe(nid, m[1]);
       if (!rc || rc.inputs.length < 2) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ': no recipe "' + m[1] + '" on record for ' + nid, 'No', ''); return; }
-      var dev = tpNum_(s.get('Development')), tier = dev >= 5 ? 3 : dev >= 3 ? 2 : dev >= 1 ? 1 : 0;
+      var dev = tpNum_(s.get('Development')), tier = dev >= 1 ? Math.ceil(dev / 2) : 0;   // 1 per two Development levels, rounded up (Development to 8, designer Turn 36)
       var can = tier > 0 ? 1 : 0;
       rc.inputs.forEach(function (inp) { can = Math.min(can, Math.floor(w.stock(nid, inp) + 1e-9)); });
       if (can <= 0) { self.log('Synthesis', nid, 'Synthesis Works idle', 'Synthesis Works at ' + label + ' made no ' + rc.name + ': short of ' + rc.inputs.join(' or '), 'No', ''); return; }
@@ -3439,6 +3473,12 @@ tpWorld_.prototype.treatyRow = function (id) {
 /** The war in which a and b stand on opposite sides (Wars: Status Active or Ongoing), or null. */
 /** Hostile ships holding a system's space: a fleet of a nation at war with nid (designer's ruling, Turn 36:
  *  while hostile forces hold a system's space, no orbital construction there; ground construction goes on). */
+/** An enemy at war with ships or ground formations in this system: the label of the first such force, or ''. */
+tpWorld_.prototype.underAttack = function (nid, sid) {
+  var self = this;
+  var f = this.forceList().filter(function (x) { return x.owner !== nid && x.location === sid && (x.ships > 0 || x.groundPower > 0) && self.warBetween(nid, x.owner); })[0];
+  return f ? (this.nameOf(f.owner) + ' (' + f.id + ')') : '';
+};
 tpWorld_.prototype.hostileSpace = function (nid, sid) {
   var self = this;
   var f = this.forceList().filter(function (x) { return x.owner !== nid && x.location === sid && x.ships > 0 && self.warBetween(nid, x.owner); })[0];
