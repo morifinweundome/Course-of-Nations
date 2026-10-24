@@ -3407,7 +3407,7 @@ tpWorld_.prototype.upkeepShortfall = function (n) {
 tpWorld_.prototype.atWar = function (nid) {
   var W = this.model.tab('Wars');
   return W.rows().some(function (r) {
-    if (String(W.get(r, 'Status') || '').trim() !== 'Active') return false;
+    if (!/^(?:active|ongoing)$/i.test(String(W.get(r, 'Status') || '').trim())) return false;
     var sides = (String(W.get(r, 'Side A (IDs)')) + ',' + String(W.get(r, 'Side B (IDs)')) + ',' + String(W.get(r, 'Joined later (ID:A or B:turn; ...)'))).split(/[,;:\s]+/);
     return sides.indexOf(nid) >= 0;
   });
