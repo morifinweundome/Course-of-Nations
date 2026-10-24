@@ -984,6 +984,8 @@ function tpBuildChecks_(world, sim, sys, b, depositWanted) {
   var free = tpNum_(sys.get('Slots')) - tpNum_(sys.get('Slots used')) - (sim.slotsAdded[sys.id] || 0);
   if (b.slot !== false && free < 1) return tpReject_('No free building slot in ' + tpSysLabel_(sys));
   if (b.orbital) {
+    var hostO = world.hostileSpace(sim.nid, sys.id);
+    if (hostO) return tpReject_('Hostile forces hold ' + tpSysLabel_(sys) + '\'s space (' + hostO + '): no orbital construction until they are driven off');
     // Orbital slots (ruling, 23 Oct 2026): one per system, plus one at Development 4.
     var oSlots = 1 + (tpNum_(sys.get('Development')) >= 4 ? 1 : 0);
     var oUsed = existing.filter(function (x) { return tpIsOrbital_(world, x); }).length;
@@ -1092,7 +1094,7 @@ function tpEvDefence_(world, sim, args) {
     return tpBuildChecks_(world, sim, s0, world.building(inst));
   }
   var m = p.what.match(/(\d+)/);
-  if (!m || !/^(?:static\s+defen[cs]e\s*)?\d+(?:\s*(?:points?|pts?))?(?:\s*(?:of\s+)?static\s+defen[cs]e)?$/i.test(p.what.trim())) {
+  if (!m || !/^(?:static\s+defen[cs]e\s*)?x?\s*\d+(?:\s*(?:points?|pts?))?(?:\s*(?:of\s+)?static\s+defen[cs]e)?$/i.test(p.what.trim())) {
     return tpRuling_('Defence not recognised: "' + p.what + '"', 'Not Static Defence or a listed installation', 'Identify the defence.');
   }
   var pts = Number(m[1]);
@@ -1100,6 +1102,8 @@ function tpEvDefence_(world, sim, args) {
   if (!sys) return tpRuling_('System not found: "' + p.where + '"', 'The script cannot find this system', 'Identify the system.');
   if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
   if (sim.tiers.Military < TURN_CONFIG.STATIC_DEFENCE_MILITARY_TIER) return tpReject_('Static Defence requires Military Tier ' + TURN_CONFIG.STATIC_DEFENCE_MILITARY_TIER);
+  var hostD = world.hostileSpace(sim.nid, sys.id);
+  if (hostD) return tpReject_('Hostile forces hold ' + tpSysLabel_(sys) + '\'s space (' + hostD + '): Static Defence cannot be raised until they are driven off');
   var have = world.staticDefenceAt(sim.nid, sys.id) + (sim.staticAdded[sys.id] || 0);
   var max = TURN_CONFIG.STATIC_DEFENCE_POINTS_PER_DEVELOPMENT * tpNum_(sys.get('Development'));
   if (have + pts > max) return tpReject_('At most ' + max + ' Static Defence points in ' + tpSysLabel_(sys) + ' (holds ' + have + ')');
@@ -3433,6 +3437,13 @@ tpWorld_.prototype.treatyRow = function (id) {
   return out;
 };
 /** The war in which a and b stand on opposite sides (Wars: Status Active or Ongoing), or null. */
+/** Hostile ships holding a system's space: a fleet of a nation at war with nid (designer's ruling, Turn 36:
+ *  while hostile forces hold a system's space, no orbital construction there; ground construction goes on). */
+tpWorld_.prototype.hostileSpace = function (nid, sid) {
+  var self = this;
+  var f = this.forceList().filter(function (x) { return x.owner !== nid && x.location === sid && x.ships > 0 && self.warBetween(nid, x.owner); })[0];
+  return f ? (this.nameOf(f.owner) + ' (' + f.id + ')') : '';
+};
 tpWorld_.prototype.warBetween = function (a, b) {
   var W = tpTryTab_(this.model, 'Wars'), hit = null;
   if (!W) return null;
