@@ -581,7 +581,7 @@ function worldTip(w) {
   const out = ['Industry', 'Energy', 'Research', 'Influence'].map(k => num(w[k]) ? `${num(w[k])} ${k}` : '').filter(Boolean).join(' · ');
   const yesno = v => v === 'Yes' || v === true || v === 'TRUE';
   return `<h5>${esc(w.name)}</h5><div class="k">${esc([w.kind, w.env].filter(Boolean).join(' · '))}${w.orbit ? ' · orbit ' + esc(w.orbit) : ''}</div>
-    <dl>${row('Population', popText(w.pop) || (yesno(w.settled) ? 'Settled' : 'Unsettled'))}${row('Habitable', w.habitable)}${row('Buildings', w.buildings)}${row('Producing', out || (num(w.pop) ? '' : 'Nothing'))}</dl>
+    <dl>${row('Population', popText(w.pop) || (yesno(w.settled) ? 'Settled' : w.settled ? 'Unsettled' : ''))}${row('Habitable', w.habitable)}${row('Buildings', w.buildings)}${w.settled ? row('Producing', out || (num(w.pop) ? '' : 'Nothing')) : ''}</dl>
     ${w.desc ? `<p>${esc(w.desc)}</p>` : ''}`;
 }
 function wireWorlds(s) {
