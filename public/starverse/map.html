@@ -487,7 +487,7 @@ function buildLabels() {
     addLab(name === 'Core' ? 'THE CORE' : 'SECTOR ' + name, out, 'sector', null);
   });
   SYS.forEach(s => {
-    const text = s.name ? `${s.name} · ${s.id}` : s.id;
+    const text = s.name || s.id;
     if (text) addLab(text, s.pos, 'sys', s);
   });
 }
@@ -632,7 +632,7 @@ function card(s) {
     <div class="own">${s.owner ? `<span class="sw" style="background:${s.colour};color:${s.colour}"></span>Held by ${esc(s.owner)}${s.lessor ? ` · leased from <span style="color:${s.lessorColour}">${esc(s.lessor)}</span>` : ''}` : '<span style="color:var(--muted)">Unclaimed</span>'}</div>
     ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
     ${body}${worksSection(s)}${worldsSection(s)}${gm}
-    <div class="sec"><h4>Hyperlanes · ${s.adj.length}</h4>${s.adj.map(a => { const t = byId.get(a); return `<button class="jump" data-id="${esc(a)}">${t.name ? esc(t.name) + ' · ' : ''}${esc(a)}</button>`; }).join('')}</div>`;
+    <div class="sec"><h4>Hyperlanes · ${s.adj.length}</h4>${s.adj.map(a => { const t = byId.get(a); return `<button class="jump" data-id="${esc(a)}" title="${esc(a)}">${esc(t.name || a)}</button>`; }).join('')}</div>`;
   $('#card').classList.add('on');
   $('#card .x').onclick = closeCard;
   $('#wtip').style.display = 'none'; wireWorlds(s);
