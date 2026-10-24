@@ -540,6 +540,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     BK_EXTRA.forEach(function (x) { if (!list.some(function (b) { return b.Item === x.Item; })) list.push(x); });
     return list;
   }
+  // Units of a material left for row i: held, less USE lines and ship fittings (at least 1 a ship) elsewhere in the basket.
+  function bkMatLeft(k, rows, i) {
+    var held = num((STOCK[k] || {})['Stockpile']);
+    rows.forEach(function (x, j) {
+      if (j === i) return;
+      if (x.verb === 'USE' && x.what === k) held -= Math.max(1, Math.round(num(x.qty) || 1));
+      if (x.verb === 'SHIP' && [x.fit1, x.fit2, x.fit3].indexOf(k) >= 0) held -= Math.max(1, Math.round(num(x.qty) || 1));
+    });
+    return held;
+  }
   function bkPriceRow(group, item) { return BK.prices.filter(function (r) { return r['Group'] === group && r['Item'] === item; })[0]; }
 
   /* Each row: its order text, its estimated cost, and a check against the nation and the rest of the basket. */
@@ -643,12 +653,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       case 'SHIP': case 'GROUND': {
         var grp = r.verb === 'SHIP' ? 'Ships' : 'Ground formations', p2 = bkPriceRow(grp, r.what), s3 = bkSys(r.sys), q = Math.max(1, Math.round(num(r.qty) || 1));
         if (!p2 || !s3) { bad('Choose a ' + (r.verb === 'SHIP' ? 'category' : 'formation') + ', a number and a system.'); break; }
-        out.text = r.verb + ' ' + r.what + ' x' + q + ' @ ' + s3['System ID'];
+        var fits = r.verb === 'SHIP' ? [r.fit1, r.fit2, r.fit3].filter(function (x, j, a) { return x && a.indexOf(x) === j; }) : [];
+        out.text = r.verb + ' ' + r.what + ' x' + q + ' @ ' + s3['System ID'] + (fits.length ? ' FITTED ' + fits.join(', ') : '');
         out.cost.Industry = num(p2['Industry']) * q;
         var st = bkStratParse(p2['Strategic']); Object.keys(st).forEach(function (k) { out.strat[k] = st[k] * q; });
         if (p2['Unlocked'] === 'No') bad('Not yet unlocked: ' + (p2['Requires'] || '') + '.');
         else if (r.verb === 'SHIP' && String(s3['Buildings']).indexOf('Shipyard') < 0) bad('Ships may be built only at a system with a Shipyard.');
         else if (r.verb === 'SHIP' && /Battleship|Dreadnought/.test(r.what) && num(s3['Development']) < 3) bad(r.what + 's need a Shipyard at Development 3 or more.');
+        else if (fits.some(function (k) { return bkMatLeft(k, rows, i) < q; })) bad('Each fitted ship takes at least 1 of each fitting: ' + fits.filter(function (k) { return bkMatLeft(k, rows, i) < q; }).map(function (k) { return fmt(Math.max(0, bkMatLeft(k, rows, i))) + ' ' + k + ' left'; }).join(', ') + ' for ' + q + ' ships.');
         else if (r.verb === 'GROUND' && BK_SITE[r.what] && String(s3['Buildings']).indexOf(BK_SITE[r.what]) < 0) {
           if (r.what === 'Infantry') note('No Barracks at ' + s3['System ID'] + ': Infantry may be mustered there only while it is under attack, at double cost.');
           else bad(r.what + ' is raised at a ' + BK_SITE[r.what] + '; ' + s3['System ID'] + ' has none.');
@@ -706,13 +718,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         break;
       }
       case 'USE': {
-        var uq = Math.max(1, Math.round(num(r.qty) || 1));
-        if (!r.what || !String(r.purpose || '').trim()) { bad('Choose a material and say how it is used.'); break; }
-        out.text = 'USE ' + uq + ' ' + r.what + ': ' + String(r.purpose).trim();
+        var uq = Math.max(1, Math.round(num(r.qty) || 1)), us = r.sys ? bkSys(r.sys) : null;
+        if (!r.what || (!String(r.purpose || '').trim() && !us)) { bad('Choose a material, and the system it is used on or how it is used.'); break; }
+        out.text = 'USE ' + uq + ' ' + r.what + (us ? ' @ ' + us['System ID'] : '') + (String(r.purpose || '').trim() ? ': ' + String(r.purpose).trim() : '');
         out.strat[r.what] = uq;
-        var heldN = num((STOCK[r.what] || {})['Stockpile']), usedN = others.reduce(function (a, x) { return a + (x.verb === 'USE' && x.what === r.what ? Math.max(1, Math.round(num(x.qty) || 1)) : 0); }, 0);
-        if (uq + usedN > heldN) bad('You hold ' + fmt(heldN) + ' ' + r.what + '; this basket uses ' + fmt(uq + usedN) + '.');
-        else note('Applied as the material\'s fixed effect when the turn is prepared.');
+        var heldN = num((STOCK[r.what] || {})['Stockpile']), leftN = bkMatLeft(r.what, rows, i);
+        if (uq > leftN) bad('You hold ' + fmt(heldN) + ' ' + r.what + '; this basket uses ' + fmt(heldN - leftN + uq) + '.');
+        else note('Applied as the material\'s fixed effect when the turn is prepared' + (us ? ' (on ' + bkSysLabel(us) + ')' : '') + '. Use lines are sent after your other orders.');
         break;
       }
       case 'BUY': case 'SELL': {
@@ -778,6 +790,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +
           '<select data-f="what">' + bkOpt(BK.prices.filter(function (p) { return p['Group'] === grp; }).map(function (p) { return [p['Item'], p['Item'] + (p['Unlocked'] === 'No' ? ' (locked)' : '')]; }), r.what, r.verb === 'SHIP' ? 'Category…' : 'Formation…') + '</select> @ ' +
           '<select data-f="sys">' + bkOpt(r.verb === 'SHIP' ? BK.sys.filter(function (s) { return String(s['Buildings']).indexOf('Shipyard') >= 0; }).map(function (s) { return [s['System ID'], bkSysLabel(s)]; }) : held, r.sys, 'System…') + '</select>';
+        if (r.verb === 'SHIP' && BK_ADV.length) f += ' fitted ' + ['fit1', 'fit2', 'fit3'].map(function (k) {
+          return '<select data-f="' + k + '">' + bkOpt(BK_ADV.map(function (m) { return [m, m + ' · ' + fmt(num((STOCK[m] || {})['Stockpile'])) + ' held']; }), r[k], 'No fitting') + '</select>';
+        }).join(' ');
         break;
       case 'DEFENCE':
         f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> points @ <select data-f="sys">' + bkOpt(held, r.sys, 'System…') + '</select>';
@@ -803,8 +818,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         break;
       case 'USE':
         f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +
-          '<select data-f="what">' + bkOpt(BK_ADV.map(function (k) { return [k, k + ' · ' + fmt(num((STOCK[k] || {})['Stockpile'])) + ' held']; }), r.what, 'Material…') + '</select> ' +
-          '<input data-f="purpose" placeholder="How, e.g. fit to the Cruisers built at II-07" value="' + esc(r.purpose || '') + '" style="min-width:260px">';
+          '<select data-f="what">' + bkOpt(BK_ADV.map(function (k) { return [k, k + ' · ' + fmt(num((STOCK[k] || {})['Stockpile'])) + ' held']; }), r.what, 'Material…') + '</select> @ ' +
+          '<select data-f="sys">' + bkOpt(held, r.sys, 'No system') + '</select> ' +
+          '<input data-f="purpose" placeholder="How it is used (optional once a system is chosen)" value="' + esc(r.purpose || '') + '" style="min-width:260px">';
         break;
       case 'BUY': case 'SELL':
         f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +
@@ -912,7 +928,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
   function bkSend(btn) {
     var rows = BK.draft.rows, evs = rows.map(function (r, i) { return bkEval(r, i, rows); });
-    var routine = evs.map(function (e) { return e.text; }).filter(Boolean)
+    // USE lines go after the other orders, so a material used on something ordered this turn follows that order.
+    var routine = evs.filter(function (e, j) { return rows[j].verb !== 'USE'; }).concat(evs.filter(function (e, j) { return rows[j].verb === 'USE'; })).map(function (e) { return e.text; }).filter(Boolean)
       .concat(String(BK.draft.free || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean));
     var plans = BK.draft.plans.filter(function (p) { return (p.name || '').trim(); });
     if (!routine.length && !plans.length && !String(BK.draft.covert).trim() && !String(BK.draft.questions).trim()) { $('#bkStatus').textContent = 'Nothing to send yet.'; return; }

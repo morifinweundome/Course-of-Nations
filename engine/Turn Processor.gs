@@ -88,6 +88,13 @@
  *      Nations "Species Admin Capacity". The stipend's +1 is written to Nations
  *      "Temporary Stability target". Both lapse (row made inactive, column lowered) in any
  *      turn their upkeep cannot be paid. A missing column is skipped with a Turn log line.
+ *  18. Material effects. What advanced materials and synthesis buildings do is read at run time from the
+ *      GM-only "Material effects" tab (one effect per row; see docs/material-effects.md). This file names no
+ *      material, recipe or building and holds no effect number: only generic effect keywords. Buildings act
+ *      each turn (upkeep, yields, conversions, Strain relief); USE orders are costed at Prepare and applied at
+ *      Resolve; holdings are checked each turn for dangerous stocks and Thinking Machines events (GM-only
+ *      Rulings rows for the next turn); SHIP ... FITTED records fittings on Forces "Fittings" and "Fitted Fleet
+ *      Power". A material with no "Use" row stays a ruling. With the tab empty or missing nothing changes.
  *  17. Leases. Systems "Owner" is the lessee, so output, Administrative Capacity, Stability,
  *      defence and builds already fall on it; "Lessor (sovereign)" names the sovereign. Each turn, after
  *      Upkeep, the resolver pays the lease: Rent (lessee to lessor; unpaid rent ends the lease), Extraction
@@ -143,7 +150,9 @@ var TURN_CONFIG = {
     // The Galactic Exchange: one row per resource per turn, written at Resolve. Price is the published price for the next turn.
     'Exchange': ['Turn', 'Resource', 'Base', 'Price', 'Target', 'Demand', 'Supply', 'Depth', 'Inventory', 'Bought by Exchange', 'Sold by Exchange', 'Trades'],
     // Standing Exchange orders: limit orders left open, and sliced orders.
-    'Exchange orders': ['Order ID', 'Nation', 'Side', 'Resource', 'Remaining', 'Limit', 'Slice', 'Turns left', 'Placed (turn)', 'Action row', 'Status', 'Note']
+    'Exchange orders': ['Order ID', 'Nation', 'Side', 'Resource', 'Remaining', 'Limit', 'Slice', 'Turns left', 'Placed (turn)', 'Action row', 'Status', 'Note'],
+    // GM only: what materials and synthesis buildings do (docs/material-effects.md). One effect per row.
+    'Material effects': ['Item', 'Applies', 'Effect', 'Resource', 'Value', 'Units', 'Per', 'Cap', 'Ship classes', 'Input', 'Requires', 'Notes']
   },
 
   // Columns the script may write, by header text. '*' = any column.
@@ -156,7 +165,7 @@ var TURN_CONFIG = {
     'Treaties': ['Ended (turn)', 'Status'],
     'Worlds': ['System ID', 'World', 'Orbit', 'Kind', 'Environment', 'Habitable', 'Settled', 'Population (bn)', 'Buildings here', 'Description'],
     'Forces': ['Force ID', 'Owner', 'Name', 'Location', 'Escorts', 'Cruisers', 'Battleships', 'Dreadnoughts', 'Transports',
-               'Ground Power', 'Static Defence', 'Note'],
+               'Ground Power', 'Static Defence', 'Note', 'Fittings', 'Fitted Fleet Power'],
     'Nations': ['Status', 'Government', 'Order–Liberty', 'Sacred–Secular', 'Martial–Pacific', 'Outward–Inward',
                 'Civic 1', 'Civic 2', 'Civic 3', 'Civic 4', 'Military tier', 'Industry tier', 'Society tier', 'Logistics tier',
                 'Temporary Stability target', 'Species Admin Capacity'],
@@ -178,7 +187,7 @@ var TURN_CONFIG = {
 
   VERBS: ['DEVELOP', 'DESIGNATE', 'BUILD', 'SHIP', 'GROUND', 'DEFENCE', 'RESEARCH', 'COLONIZE', 'CONTACT', 'MOVE',
           'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL',
-          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE', 'NAME', 'SETTLE', 'RESETTLE'],
+          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE', 'NAME', 'SETTLE', 'RESETTLE', 'USE'],
   VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE', REMEDIATION: 'REMEDIATE', RENAME: 'NAME' },
 
   // Rules: Development to level N costs 3 x N Industry.
@@ -216,6 +225,8 @@ var TURN_CONFIG = {
   TECH_BRANCH_COLUMN: { Military: 'Military tier', Industry: 'Industry tier', Society: 'Society tier', Logistics: 'Logistics tier' },
   SHIP_COLUMNS: { Escort: 'Escorts', Cruiser: 'Cruisers', Battleship: 'Battleships', Dreadnought: 'Dreadnoughts', Transport: 'Transports' },
   SHIP_TURNS: { Dreadnought: 2 },
+  // Forces columns added (at the right) the first time a fitted ship is recorded.
+  FITTINGS_COLUMN: 'Fittings', FITTED_FP_COLUMN: 'Fitted Fleet Power',
   MILITARY_JUNTA_SHIP_PCT: -25,
   COST_FLOOR_PCT: -50,
 
@@ -841,6 +852,7 @@ function tpEvaluateBody_(world, sim, verb, body, o, phase) {
     case 'DISMANTLE': return tpEvDismantle_(world, sim, args);
     case 'REMEDIATE': return tpEvRemediate_(world, sim, args);
     case 'POLICY': case 'INITIATIVE': return tpEvPolicy_(world, sim, verb, args);
+    case 'USE': return tpEvUse_(world, sim, args);
     case 'FATE': return tpRuling_('Fate of a conquered system', 'Fates follow a peace treaty and the GM\'s ruling on its terms', 'Apply the fate chosen per The Fate Of The Conquered.');
     case 'BURN': var e = tpRuling_('Burning archives', 'Only before a peace treaty cedes the system', 'If a cession is pending: -1 Stability, Absorb unavailable.'); e.stab = 1; e.spec = { type: 'STAB_ONLY' }; return e;
     case 'BREAK': var b = tpRuling_('Breaking a treaty', 'Breaking a treaty carries Stability, Infamy and casus belli effects the GM confirms',
@@ -876,15 +888,20 @@ function tpEvDevelop_(world, sim, args) {
   var need = world.popConst('Workforce per Development squared (bn)', 0.25) * level * level * factor;
   var pop = world.systemPopulation(sys.id) - (sim.settlersFrom[sys.id] || 0);
   if (pop < need / 2) return tpReject_('Development waits for people: ' + tpRound2_(pop) + ' bn held, ' + tpRound2_(need / 2) + ' bn needed (half of ' + tpRound2_(need) + ')');
-  var pct = tpNum_(sim.calc['Development cost %']);
-  var notes = [];
-  if (/Underway/i.test(sys.get('Buildings'))) { pct += -25; notes.push('Underway -25%'); }
-  pct = Math.max(TURN_CONFIG.COST_FLOOR_PCT, pct);
+  var dp = tpDevPct_(sim, sys), notes = dp.notes;
+  var pct = Math.max(TURN_CONFIG.COST_FLOOR_PCT, dp.pct);
   var base = TURN_CONFIG.DEVELOPMENT_COST_PER_LEVEL * level;
   var cost = tpRoundHalfUp_(base * (1 + pct / 100));
   return tpReady_(tpSysLabel_(sys) + ': Development ' + cur + ' to ' + level,
     '3 x ' + level + ' = ' + base + ' Industry, Development cost ' + tpSigned_(pct) + '% = ' + tpRound2_(base * (1 + pct / 100)) + ' -> ' + cost + (notes.length ? ' (' + notes.join(', ') + ')' : ''),
     { Industry: cost }, {}, { type: 'DEVELOP', sys: sys.id, level: level });
+}
+
+/** Development cost modifier for a system before the floor: the nation's Development cost % and an Underway. */
+function tpDevPct_(sim, sys) {
+  var pct = tpNum_(sim.calc['Development cost %']), notes = [];
+  if (/Underway/i.test(sys.get('Buildings'))) { pct += -25; notes.push('Underway -25%'); }
+  return { pct: pct, notes: notes };
 }
 
 // ---------- DESIGNATE <system> [as] <designation> ----------
@@ -1043,8 +1060,14 @@ function tpEvSignatureWork_(world, sim, sys, name) {
   return tpBuildChecks_(world, sim, sys, { name: name, industry: w.industry, strat: {}, req: {}, turns: 1, slot: true });
 }
 
-// ---------- SHIP <category> x<n> @ <system> ----------
+// ---------- SHIP <category> x<n> @ <system> [FITTED <material>, ...] ----------
 function tpEvShip_(world, sim, args) {
+  var fitText = '', fm = String(args).match(/^(.*?)\s+FITTED\s+(?:WITH\s+)?(.+)$/i);
+  if (fm) {
+    args = fm[1]; fitText = fm[2];
+    var fa = fitText.match(/^(.*?)\s*@\s*(.+)$/);   // "SHIP Cruiser x2 FITTED X @ C-04"
+    if (fa) { fitText = fa[1]; args = args + ' @ ' + fa[2]; }
+  }
   var p = tpSplitAt_(args);
   if (!p) return tpRuling_('No shipyard system given (write SHIP <category> x<n> @ <system>)', 'The system is missing', 'Identify the system.');
   var q = tpParseQty_(p.what);
@@ -1059,9 +1082,12 @@ function tpEvShip_(world, sim, args) {
   if (mt && sim.tiers.Military < Number(mt[1])) return tpReject_('Requires Military Tier ' + mt[1]);
   var sd = req.match(/Shipyard Dev (\d)/i);
   if (sd && tpNum_(sys.get('Development')) < Number(sd[1])) return tpReject_('Requires a Shipyard at Development ' + sd[1] + ' or more');
-  var capAdd = cat.capacity * q.n;
+  // Fittings (Material effects, Applies Fitting): each costs its units per ship and may cut the ship's cost or capacity.
+  var fit = tpShipFittings_(world, cat, q.n, fitText);
+  if (fit.error) return fit.error;
+  var capAdd = fit.capMult ? tpRound2_(cat.capacity * q.n * (1 + fit.capMult)) : cat.capacity * q.n;
   // Military Capacity (designer, Turn 36): ships and ground formations share one pool (Calculations "Fleet Capacity").
-  var used = tpNum_(sim.calc['Ship capacity used']) + tpNum_(sim.calc['Ground Power']) + sim.shipCapAdded + sim.armyCapAdded;
+  var used = tpNum_(sim.calc['Ship capacity used']) + tpNum_(sim.calc['Ground Power']) + sim.shipCapAdded + sim.armyCapAdded - world.mfxCapacityRelief(sim.nid);
   var fc = tpNum_(sim.calc['Fleet Capacity']);
   if (used + capAdd > fc) return tpReject_('Over Military Capacity: ' + tpRound2_(used) + ' used + ' + capAdd + ' > ' + fc);
   var pct = tpNum_(sim.calc['Fiscal ship cost %']) + (sim.hasCivic('Military Junta') ? TURN_CONFIG.MILITARY_JUNTA_SHIP_PCT : 0);
@@ -1070,11 +1096,15 @@ function tpEvShip_(world, sim, args) {
   var cost = tpRoundHalfUp_(base * (1 + pct / 100));
   var strat = {};
   TURN_CONFIG.STRATEGIC.forEach(function (s) { if (cat.strat[s]) strat[s] = cat.strat[s] * q.n; });
+  if (fit.cut.Industry) cost = Math.max(0, tpRound2_(cost - fit.cut.Industry));
+  Object.keys(fit.cut).forEach(function (r) { if (r !== 'Industry' && strat[r]) strat[r] = Math.max(0, tpRound2_(strat[r] - fit.cut[r])); });
+  Object.keys(fit.units).forEach(function (m) { strat[m] = (strat[m] || 0) + fit.units[m]; });
   var turns = TURN_CONFIG.SHIP_TURNS[cat.name] || 1;
-  return tpReady_(q.n + ' ' + cat.name + (q.n > 1 ? 's' : '') + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : ''),
-    q.n + ' x ' + cat.industry + ' = ' + base + ' Industry' + (pct ? ', ship cost ' + tpSigned_(pct) + '% -> ' + cost : '') +
+  return tpReady_(q.n + ' ' + cat.name + (q.n > 1 ? 's' : '') + ' at ' + tpSysLabel_(sys) + (turns > 1 ? ' (' + turns + ' turns)' : '') + (fit.items.length ? ', fitted ' + fit.items.join(', ') : ''),
+    q.n + ' x ' + cat.industry + ' = ' + base + ' Industry' + (pct ? ', ship cost ' + tpSigned_(pct) + '% -> ' + tpRoundHalfUp_(base * (1 + pct / 100)) : '') +
+    (fit.notes.length ? '; ' + fit.notes.join('; ') + (fit.cut.Industry ? ' -> ' + cost + ' Industry' : '') : '') +
     (tpStratText_(strat) ? '; ' + tpStratText_(strat) : '') + '; capacity ' + capAdd + ' (' + tpRound2_(used + capAdd) + ' of ' + fc + ')',
-    { Industry: cost }, strat, { type: 'SHIP', sys: sys.id, cat: cat.name, n: q.n, turns: turns }, { capAdd: capAdd });
+    { Industry: cost }, strat, { type: 'SHIP', sys: sys.id, cat: cat.name, n: q.n, turns: turns, fit: fit.items }, { capAdd: capAdd });
 }
 
 // ---------- GROUND <formation> x<n> @ <system> ----------
@@ -1096,7 +1126,7 @@ function tpEvGround_(world, sim, args) {
   if (f.needsCollege && !sim.nationHasBuilding('Military College')) return tpReject_('Special Forces need a Military College');
   if (f.needsEnvironment && !env) return tpRuling_('Specialised Infantry needs its environment named', 'Write e.g. GROUND Specialised Infantry (Frozen) x2 @ ...', 'Ask the player for the environment.');
   var capAdd = f.capacity * q.n;
-  var used = tpNum_(sim.calc['Ship capacity used']) + tpNum_(sim.calc['Ground Power']) + sim.shipCapAdded + sim.armyCapAdded;
+  var used = tpNum_(sim.calc['Ship capacity used']) + tpNum_(sim.calc['Ground Power']) + sim.shipCapAdded + sim.armyCapAdded - world.mfxCapacityRelief(sim.nid);
   var ac = tpNum_(sim.calc['Fleet Capacity']);
   if (used + capAdd > ac) return tpReject_('Over Military Capacity: ' + tpRound2_(used) + ' used + ' + capAdd + ' > ' + ac);
   // Training sites (designer, Turn 36): a Barracks or a Vehicle Factory at this world, each copy training up to
@@ -1227,11 +1257,13 @@ function tpEvMove_(world, sim, args, phase) {
   route = route.replace(/\s*\([^()]*\)/g, '').replace(/\s*[;,].*$/, '');
   var f = world.findForce(sim.nid, forceText);
   if (!f) return tpRuling_('Force not found: "' + forceText + '"', 'No force of this nation by that name or ID', 'Identify the force.');
-  if (sim.moved[f.row]) return tpReject_('This force already moves this turn');
+  // Fittings carried by every ship may lengthen the jump range or allow a second move (Material effects).
+  var fx = world.mfxForceMove(f);
+  if ((sim.moved[f.row] || 0) >= fx.moves) return tpReject_(fx.moves > 1 ? 'This force already moves ' + fx.moves + ' times this turn' : 'This force already moves this turn');
   var pts = route.split(/\s*(?:>|→|->|\bto\b)\s*/i).map(function (s) { return s.trim(); });
   var from = pts[0], waypoints = pts.slice(1).filter(function (s) { return s; });
   if (!waypoints.length) return tpRuling_('No destination', 'Route has no destination', 'Identify the move.');
-  var loc = f.location;
+  var loc = (sim.movedTo && sim.movedTo[f.row]) || f.location;
   if (from) {
     var fs = world.findSystem(from);
     if (!fs || fs.id !== loc) return tpRuling_('The force is at ' + world.label(loc) + ', not "' + from + '"', 'Its stated starting point does not match the Forces tab', 'Confirm where it starts.');
@@ -1247,6 +1279,7 @@ function tpEvMove_(world, sim, args, phase) {
   var ships = f.ships, gp = f.groundPower;
   if (gp > 0 && f.transports * 2 < gp) return tpRuling_('Ground formations need Transports', 'Formations cross lanes only aboard Transports, 2 capacity each (' + f.transports + ' Transports for ' + gp + ')', 'Confirm which formations move.');
   var range = TURN_CONFIG.BASE_JUMP_RANGE + Math.max(0, sim.tiers.Logistics - 1);
+  if (fx.rangePct) range += Math.floor(range * fx.rangePct / 100);
   var path = [loc], contested = [];
   var cur = loc;
   for (var j = 0; j < stops.length; j++) {
@@ -1267,11 +1300,13 @@ function tpEvMove_(world, sim, args, phase) {
   });
   var details = f.name + ' (' + f.id + '): ' + path.map(function (x) { return world.label(x); }).join(' > ') + ' (' + jumps + ' of ' + range + ' jumps)';
   var spec = { type: 'MOVE', force: f.id, from: loc, to: dest, path: path };
+  var fxNote = fx.notes.length ? fx.notes.join('; ') : '';
   if (contested.length) {
-    return { status: 'Needs ruling', flag: 'Contested move', details: details, spec: spec, cost: {}, strat: {}, stab: 0,
-      why: contested.join('; '), suggest: 'Passage, blockade or battle per Movement And Blockade; approve to move it there.' };
+    return { status: 'Needs ruling', flag: 'Contested move' + (fxNote ? '; ' + fxNote : ''), details: details, spec: spec, cost: {}, strat: {}, stab: 0,
+      why: contested.join('; ') + (fxNote ? '; ' + fxNote : ''), suggest: 'Passage, blockade or battle per Movement And Blockade; approve to move it there.' };
   }
   var ev = tpReady_(details, 'Uncontested; within jump range', {}, {}, spec);
+  if (fxNote) ev.flag = fxNote;
   ev.moveRow = f.row;
   return ev;
 }
@@ -2129,6 +2164,168 @@ function tpExFill_(x, side, q) {
   return { value: q * avg2, avg: avg2, after: Math.min(x.base * C.ceiling, x.price * (1 + C.s * q / D)) };
 }
 
+// ---------- Material effects: USE orders and ship fittings (rows on the GM-only Material effects tab) ----------
+// Effect keywords the engine applies to a USE order. Any other keyword on a Use row leaves the order to the GM.
+var TP_MFX_USE_TYPES_ = ['standing_add', 'develop_discount', 'system_ledger', 'system_record', 'gain'];
+/** A resource name as the Ledger writes it (main, strategic, Marks, Stability, Infamy, Degradation or a material). */
+function tpMfxRes_(name) {
+  var t = tpNorm_(name);
+  if (!t) return '';
+  var all = TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC, [TURN_CONFIG.MARKS, 'Stability', 'Infamy', 'Degradation']);
+  return all.filter(function (r) { return tpNorm_(r) === t; })[0] || TP_ADV_[t] || String(name).trim();
+}
+/** "5 Energy; 1 Antimatter" -> { Energy: 5, Antimatter: 1 }. */
+function tpMfxCosts_(text) {
+  var out = {};
+  String(text || '').split(/\s*[;,]\s*/).forEach(function (p) {
+    var m = p.trim().match(/^(\d+(?:\.\d+)?)\s+(.+)$/);
+    if (m) { var r = tpMfxRes_(m[2]); out[r] = (out[r] || 0) + Number(m[1]); }
+  });
+  return out;
+}
+/** The number in a Per cell ("4 ships" -> 4), 1 when none. */
+function tpMfxPerN_(per) { var m = String(per || '').match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : 1; }
+function tpMfxPerDev_(per) { return /^dev/i.test(String(per || '').trim()); }
+function tpMfxBase_(name) { return tpNorm_(String(name).replace(/\s*\(.*\)\s*$/, '')); }
+/** A roll in [0, 1) fixed by the turn and a key, with the same generator as the Exchange's order shuffle,
+ *  so a rerun of the turn (after restoring its snapshot) rolls the same. */
+function tpMfxRoll_(turn, key) {
+  var h = 0, s = String(key);
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 4294967296;
+  var seed = (turn * 2654435761 + h) % 4294967296;
+  for (var k = 0; k < 3; k++) seed = (seed * 1664525 + 1013904223) % 4294967296;
+  return seed / 4294967296;
+}
+/** Buildings standing (not ordered) in a system, less any dismantled earlier in these orders, matching a name. */
+function tpMfxStandingCount_(sim, sys, name) {
+  var list = String(sys.get('Buildings') || '').split(/\s*,\s*/).filter(function (x) { return x; });
+  ((sim.dismantled || {})[sys.id] || []).forEach(function (d) { var i = list.indexOf(d); if (i >= 0) list.splice(i, 1); });
+  var k = tpNorm_(name);
+  return list.filter(function (x) { return tpNorm_(x) === k || tpMfxBase_(x) === k; }).length;
+}
+
+// ---------- USE <n> <material> [@ <system or world>]: <purpose> ----------
+function tpParseUse_(args) {
+  var t = String(args || '').replace(/^\s*:\s*/, '').trim(), purpose = '', where = '';
+  var c = t.indexOf(':');
+  if (c >= 0) { purpose = t.slice(c + 1).trim(); t = t.slice(0, c).trim(); }
+  var at = t.match(/^(.*?)\s*@\s*(.+)$/);
+  if (at) { t = at[1].trim(); where = at[2].trim(); }
+  var n, name, m = t.match(/^(\d+)\s*[x×]?\s+(.+)$/i);
+  if (m) { n = Number(m[1]); name = m[2].trim(); }
+  else { m = t.match(/^(.+?)\s*[x×]\s*(\d+)$/i); if (!m) return null; n = Number(m[2]); name = m[1].trim(); }
+  if (!(n > 0) || !name) return null;
+  var key = tpNorm_(name);
+  return { n: n, name: name, item: TP_ADV_[key] || TP_ADV_[key.replace(/s$/, '')] || name, where: where, purpose: purpose };
+}
+function tpEvUse_(world, sim, args) {
+  var u = tpParseUse_(args);
+  if (!u) return tpRuling_('USE not readable (write USE <n> <material> [@ <system>]: <purpose>)', 'The quantity or the material is missing', 'Read the order and rule its effect by hand.');
+  var strat = {}; strat[u.item] = u.n;
+  var said = u.n + ' ' + u.item + (u.where ? ' @ ' + u.where : '') + (u.purpose ? ': ' + u.purpose : '');
+  var rows = world.mfxFor('use', u.item);
+  var manual = function (flag) {
+    return tpRuling_(flag, 'The GM rules what this use of the material does', 'Rule the effect; charge ' + u.n + ' ' + u.item + ' by hand (' + tpRound2_(sim.stock[u.item] || 0) + ' held at Prepare).', { details: said });
+  };
+  if (!rows.length) return manual('Material use: no automatic effect on record');
+  if (rows.some(function (x) { return TP_MFX_USE_TYPES_.indexOf(x.effect) < 0; })) return manual('Material use: effect ruled by hand');
+  var units = Math.max.apply(null, rows.map(function (x) { return x.units || 1; }));
+  if (u.n % units) return tpReject_(u.item + ' is used in lots of ' + units + ' (' + u.n + ' ordered)');
+  var apps = u.n / units, sys = null;
+  if (rows.some(function (x) { return x.effect !== 'gain'; })) {
+    sys = u.where ? world.findSystem(u.where) : null;
+    if (!sys && u.where) { var w1 = tpWorldAt_(world, u.where); if (w1 && w1.sys) sys = w1.sys; }
+    if (!sys && !u.where) { var idm = String(u.purpose).match(/\b(?:C|[IVX]+)-\d{1,2}\b/); if (idm) sys = world.findSystem(idm[0]); }
+    if (!sys) return tpRuling_(u.where ? 'System not found: "' + u.where + '"' : 'No system named (write USE <n> <material> @ <system>: <purpose>)', 'This material acts on a system', 'Identify the system.', { details: said });
+    if (!sim.ownsActive(sys.id)) return tpReject_('Not held by this nation: ' + tpSysLabel_(sys));
+  }
+  var label = sys ? tpSysLabel_(sys) : '', m = sim.mfx || { stand: {}, dev: {}, once: {} };
+  var effects = [], notes = [], cost = {};
+  for (var i = 0; i < rows.length; i++) {
+    var x = rows[i], req = 0;
+    if (x.requires && sys) {
+      req = tpMfxStandingCount_(sim, sys, x.requires);
+      if (!req) return tpReject_(u.item + ' needs a ' + x.requires + ' standing in ' + label);
+    }
+    if (x.effect === 'standing_add') {
+      var key = tpNorm_(x.item) + '|' + sys.id + '|' + x.row, had = world.mfxStanding(sim.nid, x.item, sys.id), pend = m.stand[key] || { count: 0, total: 0 };
+      if (/^build/i.test(x.per) && x.requires) {
+        var room = req - had.count - pend.count;
+        if (apps > room) return tpReject_(label + ': ' + (room > 0 ? 'room for ' + room + ' more' : 'every ' + x.requires + ' there already has one') + ' (one per ' + x.requires + ')');
+      }
+      if (x.cap && had.total + pend.total + x.value * apps > x.cap + 1e-9) return tpReject_(label + ': at most ' + x.cap + ' ' + x.res + ' a turn from ' + u.item + ' in a system (' + tpRound2_(had.total + pend.total) + ' already)');
+      effects.push({ type: 'standing_add', key: key, res: x.res, amount: x.value, apps: apps });
+      notes.push(tpSigned_(x.value * apps) + ' ' + x.res + ' a turn at ' + label + ' from next turn (Standing effects)');
+    } else if (x.effect === 'develop_discount') {
+      if (apps !== 1) return tpReject_('One lot of ' + units + ' ' + u.item + ' per Development rise');
+      var level = sim.devRaised[sys.id];
+      if (!level) return tpReject_(u.item + ' needs a DEVELOP of ' + label + ' earlier in these orders (write the USE line after it)');
+      if (m.dev[sys.id]) return tpReject_('The Development of ' + label + ' is already discounted this turn');
+      var dp = tpDevPct_(sim, sys), fl = TURN_CONFIG.COST_FLOOR_PCT, base = TURN_CONFIG.DEVELOPMENT_COST_PER_LEVEL * level;
+      var before = tpRoundHalfUp_(base * (1 + Math.max(fl, dp.pct) / 100)), after = tpRoundHalfUp_(base * (1 + Math.max(fl, dp.pct - x.value) / 100));
+      if (before - after <= 0) return tpReject_('The Development of ' + label + ' already costs the least the floor allows (' + fl + '%)');
+      cost.Industry = (cost.Industry || 0) - (before - after);
+      effects.push({ type: 'develop_discount', sys: sys.id, refund: before - after });
+      notes.push('Development of ' + label + ' to ' + level + ': ' + before + ' -> ' + after + ' Industry (' + (before - after) + ' returned; floor ' + fl + '%)');
+    } else if (x.effect === 'system_ledger' || x.effect === 'system_record') {
+      var forever = /^(?:system|world)/i.test(x.per), once = tpNorm_(x.item) + '|' + sys.id + '|' + x.row + (forever ? '' : '|T' + (world.turnNo || 0));
+      if (apps !== 1) return tpReject_('One lot of ' + units + ' ' + u.item + ' per system' + (forever ? '' : ' a turn'));
+      if (m.once[once] || (forever && world.mfxLedgerOnce(sys.id, x.res, x.item))) return tpReject_(u.item + ' has already been used on ' + label + (forever ? '' : ' this turn'));
+      if (x.res === 'Degradation' && x.value < 0 && world.systemsTab.c('Degradation') >= 0) {
+        var cur = tpRound2_(tpNum_(sys.get('Degradation')) - (sim.remediated[sys.id] || 0));
+        if (cur <= 0) return tpReject_(tpSysLabel_(sys) + ' has no Degradation to remove');
+      }
+      effects.push({ type: x.effect, once: once, res: x.res, amount: x.value, notes: x.notes });
+      notes.push(x.res + ' ' + tpSigned_(x.value) + ' on ' + label + (x.effect === 'system_record' ? ' (recorded; a ruling asks the GM to apply it)' : ''));
+    } else if (x.effect === 'gain') {
+      effects.push({ type: 'gain', res: x.res, amount: tpRound2_(x.value * apps) });
+      notes.push(tpSigned_(x.value * apps) + ' ' + x.res);
+    }
+  }
+  return tpReady_(u.n + ' ' + u.item + (label ? ' at ' + label : '') + (u.purpose ? ': ' + u.purpose : ''), notes.join('; '), cost, strat,
+    { type: 'USE', item: u.item, sys: sys ? sys.id : '', n: u.n, effects: effects });
+}
+function tpMfxCommitUse_(sim, sp) {
+  var m = sim.mfx = sim.mfx || { stand: {}, dev: {}, once: {} };
+  (sp.effects || []).forEach(function (e) {
+    if (e.type === 'standing_add') { var o = m.stand[e.key] = m.stand[e.key] || { count: 0, total: 0 }; o.count += e.apps; o.total += e.amount * e.apps; }
+    else if (e.type === 'develop_discount') m.dev[e.sys] = true;
+    else if (e.once) m.once[e.once] = true;
+  });
+}
+
+/** Fittings named on a SHIP order: units charged, cost cuts and capacity change for the ships built. */
+function tpShipFittings_(world, cat, n, text) {
+  var out = { items: [], units: {}, cut: {}, capMult: 0, notes: [] };
+  var names = String(text || '').split(/\s*(?:,|;|\+|&|\band\b)\s*/i).map(function (x) { return x.replace(/^(?:an?|the)\s+/i, '').replace(/\s*[x×]\s*\d+\s*$/i, '').trim(); }).filter(function (x) { return x; });
+  for (var i = 0; i < names.length; i++) {
+    var rows = world.mfxFor('fitting', names[i]);
+    if (!rows.length) { out.error = tpRuling_('Fitting not recognised: "' + names[i] + '"', 'No fitting of that name on record', 'Price and record the fitting by hand, or build the ships unfitted.'); return out; }
+    var spec = world.fittingSpec(rows[0].item), item = spec.item;
+    if (out.items.indexOf(item) >= 0) continue;
+    if (spec.classes.length && spec.classes.indexOf(tpNorm_(cat.name)) < 0) { out.error = tpReject_(item + ' cannot be fitted to a ' + cat.name); return out; }
+    out.items.push(item);
+    out.units[item] = spec.units * n;
+    out.notes.push(item + ' ' + spec.units + ' a ship = ' + spec.units * n);
+    rows.forEach(function (x) {
+      if (x.classes.length && x.classes.indexOf(tpNorm_(cat.name)) < 0) return;
+      if (x.effect === 'cost_cut' && x.res) { out.cut[x.res] = (out.cut[x.res] || 0) + x.value * n; out.notes.push(item + ': ' + x.value * n + ' ' + x.res + ' less'); }
+      else if (x.effect === 'capacity_mult') out.capMult += x.value;
+    });
+  }
+  return out;
+}
+/** Forces "Fittings": "<fitting> x<ships> (<class>s); ..." e.g. "Item A x2 (Battleships); Item B x4 (Escorts)" <-> [{ item, n, cls }]. */
+function tpFitParse_(world, text) {
+  return String(text || '').split(/\s*;\s*/).map(function (p) {
+    var m = p.trim().match(/^(.+?)\s*[x×]\s*(\d+)(?:\s*\(\s*([^)]*?)\s*\))?$/i);
+    if (!m) return null;
+    var cat = m[3] ? world.shipCategory(m[3]) : null, rows = world.mfxFor('fitting', m[1]);
+    return { item: rows.length ? rows[0].item : m[1].trim(), n: Number(m[2]), cls: cat ? cat.name : '' };
+  }).filter(function (x) { return x; });
+}
+function tpFitText_(list) { return list.map(function (e) { return e.item + ' x' + e.n + (e.cls ? ' (' + e.cls + 's)' : ''); }).join('; '); }
+
 // ---------- shared checks ----------
 function tpAffordable_(sim, ev) {
   var short = [];
@@ -2162,7 +2359,8 @@ function tpCommitSim_(sim, ev) {
     case 'FIRST_CONTACT': sim.contacted[sp.target] = true; break;
     case 'STIPEND': sim.stipend = true; sim.targetBonus = (sim.targetBonus || 0) + 1; break;
     case 'CHARTER': sim.charters = (sim.charters || 0) + sp.n; break;
-    case 'MOVE': sim.moved[ev.moveRow] = true; break;
+    case 'MOVE': sim.moved[ev.moveRow] = (sim.moved[ev.moveRow] || 0) + 1; (sim.movedTo = sim.movedTo || {})[ev.moveRow] = sp.to; break;
+    case 'USE': tpMfxCommitUse_(sim, sp); break;
     case 'SHIFT': sim.shifted = true; sim.axes[sp.col] = sp.value; break;
     case 'CIVIC': sim.civicCols[sp.col] = sp.value; sim.civics = TURN_CONFIG.CIVIC_COLUMNS.map(function (k) { return sim.civicCols[k]; }).filter(function (x) { return x; }); break;
     case 'REFORM': sim.reformed = true; sim.gov = sp.gov; break;
@@ -2252,7 +2450,8 @@ tpResolver_.prototype.run = function (dry) {
   w.systems.forEach(function (s) {
     self.startGrowth[s.id] = tpNum_(s.get('Growth due (bn)'));
     var aq = s.get('Change this turn');
-    self.startToll[s.id] = { change: aq === '' ? 0 : tpNum_(aq), crowded: String(s.get('Overcrowded')) === 'Yes', owner: s.get('Owner') };
+    self.startToll[s.id] = { change: aq === '' ? 0 : tpNum_(aq), crowded: String(s.get('Overcrowded')) === 'Yes', owner: s.get('Owner'),
+      deg: tpNum_(s.get('Degradation')), strain: tpNum_(s.get('Strain')), cap: tpNum_(s.get('Capacity')) };
   });
   this.decisions = this.readDecisions();
   this.actions = this.readActions();
@@ -2262,9 +2461,12 @@ tpResolver_.prototype.run = function (dry) {
   this.phaseDiplomacy();
   this.phaseIncome();
   this.phaseUpkeep();
+  this.phaseFittingFuel();
   this.phaseLeases();
   this.phaseStandingEffects();
+  this.phaseBuildingEffects();
   this.phaseSynthesis();
+  this.phaseHoldings();
   this.phaseExchange();
   this.phaseSpending();
   this.phaseMovement();
@@ -2273,6 +2475,7 @@ tpResolver_.prototype.run = function (dry) {
   this.phaseWorldToll();
   this.phaseInfamy();
   this.phaseCompletions();
+  this.phaseFittedPower();
   this.phaseLeaseEndings();
   if (!dry) { this.model.commit(); tpFlush_(); this.model.reload('Calculations'); this.world.reloadCalc(); }
   this.phaseStability();
@@ -2610,9 +2813,10 @@ tpResolver_.prototype.apply = function (a, sp, ev) {
       else for (var bc = 0; bc < (sp.copies || 1); bc++) this.completions.push({ kind: 'Building', nation: n, sys: sp.sys, item: sp.building, row: a.actionNo });
       break;
     case 'SHIP':
-      if ((sp.turns || 1) > 1) this.addWork(n, 'Ships', sp.n + ' ' + sp.cat, sp.sys, turn + sp.turns - 1, a.actionNo);
-      else this.completions.push({ kind: 'Ships', nation: n, sys: sp.sys, cat: sp.cat, n: sp.n, row: a.actionNo });
+      if ((sp.turns || 1) > 1) this.addWork(n, 'Ships', sp.n + ' ' + sp.cat + (sp.fit && sp.fit.length ? ' fitted ' + sp.fit.join(', ') : ''), sp.sys, turn + sp.turns - 1, a.actionNo);
+      else this.completions.push({ kind: 'Ships', nation: n, sys: sp.sys, cat: sp.cat, n: sp.n, fit: sp.fit || [], row: a.actionNo });
       break;
+    case 'USE': return this.applyUse(a, sp);
     case 'GROUND':
       var item = sp.n + ' ' + sp.form + (sp.env ? ' (' + sp.env + ')' : '');
       if ((sp.turns || 1) > 1) this.addWork(n, 'Formations', item, sp.sys, turn + sp.turns - 1, a.actionNo);
@@ -2770,7 +2974,7 @@ tpResolver_.prototype.phaseMovement = function () {
     var f = w.forceById(ev.spec.force);
     w.forcesTab.set(f.row, 'Location', ev.spec.to);
     f.location = ev.spec.to;
-    self.simFor(a.nation).moved[f.row] = true;
+    var msim = self.simFor(a.nation); msim.moved[f.row] = (msim.moved[f.row] || 0) + 1;
     self.log('Movement', a.nation, 'Moved', f.name + ' (' + f.id + '): ' + ev.spec.path.map(function (x) { return w.label(x); }).join(' > ') + (approved ? ' (GM ruling)' : ''), 'No', a.actionNo);
     self.setStatus(a, 'Applied'); a.spec = ev.spec;
     self.settleRuling(self.decisions['A' + a.actionNo]);
@@ -2812,6 +3016,7 @@ tpResolver_.prototype.phaseWorldToll = function () {
     if (t.crowded) parts.push('overcrowded +0.5');
     self.ledger('World toll', s.id, 'Degradation', tpRound2_(change), 'Degradation this turn' + (t.owner ? ' (' + t.owner + ')' : ''), parts.join('; '), '');
   });
+  this.mfxWorldToll();
 };
 
 // ---------------- Phase 8: Infamy decay ----------------
@@ -2835,7 +3040,7 @@ tpResolver_.prototype.phaseCompletions = function () {
     var kind = WIP.get(r, 'Kind'), item = String(WIP.get(r, 'Item'));
     var c = { nation: WIP.get(r, 'Nation'), sys: WIP.get(r, 'System'), row: WIP.get(r, 'Action row') };
     if (kind === 'Building') { c.kind = 'Building'; c.item = item; }
-    else if (kind === 'Ships') { var m = item.match(/^(\d+)\s+(.+)$/); c.kind = 'Ships'; c.n = Number(m[1]); c.cat = m[2]; }
+    else if (kind === 'Ships') { var m = item.match(/^(\d+)\s+(.+?)(?:\s+fitted\s+(.+))?$/i); c.kind = 'Ships'; c.n = Number(m[1]); c.cat = m[2]; c.fit = m[3] ? m[3].split(/\s*,\s*/) : []; }
     else if (kind === 'Formations') { var m2 = item.match(/^(\d+)\s+([^(]+?)(?:\s+\((.+)\))?$/); c.kind = 'Formations'; c.n = Number(m2[1]); c.form = m2[2]; c.env = m2[3] || ''; }
     self.completions.push(c);
     WIP.set(r, 'Status', 'Completed');
@@ -2854,7 +3059,8 @@ tpResolver_.prototype.phaseCompletions = function () {
         var f = w.fleetAt(c.nation, c.sys, true);
         var col = TURN_CONFIG.SHIP_COLUMNS[c.cat];
         w.forcesTab.set(f.row, col, tpNum_(w.forcesTab.get(f.row, col)) + c.n);
-        self.log('Completion', c.nation, 'Ships', c.n + ' ' + c.cat + ' join ' + f.id + ' at ' + w.label(c.sys), 'No', c.row); break;
+        if (c.fit && c.fit.length) self.addFittings(f.row, c.cat, c.n, c.fit);
+        self.log('Completion', c.nation, 'Ships', c.n + ' ' + c.cat + ' join ' + f.id + ' at ' + w.label(c.sys) + (c.fit && c.fit.length ? ' (fitted ' + c.fit.join(', ') + ')' : ''), 'No', c.row); break;
       case 'Formations':
         var army = w.armyAt(c.nation, c.sys);
         var def = TURN_CONFIG.FORMATIONS[c.form].defence * c.n;
@@ -2947,6 +3153,216 @@ tpResolver_.prototype.phaseSynthesis = function () {
       self.ledger('Income', nid, rc.name, made, why, working, '');
     });
   });
+};
+
+// ---------------- Material effects (rows on the GM-only Material effects tab) ----------------
+/** A Turn log line with its roll (never public). */
+tpResolver_.prototype.logRoll = function (phase, nations, event, desc, roll) {
+  this.TL.add('Event', { 'Turn': this.turn, 'Phase': phase, 'Nations': nations, 'Event': event, 'Description': desc, 'Roll': roll, 'Public': 'No', 'Action row': '' });
+};
+/** Degradation of a system now: Systems "Degradation" at the start of the resolution plus this turn's Ledger lines. */
+tpResolver_.prototype.degradationNow = function (sid) {
+  var w = this.world, L = this.L, turn = this.turn, t = (this.startToll || {})[sid];
+  if (!t || w.systemsTab.c('Degradation') < 0) return w.stock(sid, 'Degradation');
+  var add = 0;
+  L.rows().forEach(function (r) { if (L.get(r, 'Nation') === sid && L.get(r, 'Resource') === 'Degradation' && tpNum_(L.get(r, 'Turn')) === turn) add += tpNum_(L.get(r, 'Amount')); });
+  return tpRound2_(t.deg + add);
+};
+
+/** Each turn, after Standing effects: every building with Building rows pays its upkeep (or is dark this turn,
+ *  doing nothing), then yields (yield_mult, yield_add) and converts (convert). Lit buildings are remembered
+ *  for the World toll (strain_capacity, heal) and the holdings check (unlimited_containment, thinking). */
+tpResolver_.prototype.phaseBuildingEffects = function () {
+  var self = this, w = this.world;
+  this.mfxLit = [];
+  if (!w.mfxFor('building').length) return;
+  w.systems.forEach(function (s) {
+    var nid = s.get('Owner'); if (!nid || String(s.get('Status') || '').trim()) return;
+    var nat = w.nation(nid); if (!nat || nat.status === 'Eliminated') return;
+    var label = tpSysLabel_(s), dev = tpNum_(s.get('Development'));
+    String(s.get('Buildings') || '').split(/\s*,\s*/).forEach(function (bn) {
+      if (!bn) return;
+      var rows = w.mfxFor('building', bn);
+      if (!rows.length) return;
+      var name = rows[0].item, why = name + ' at ' + label;
+      var times = function (x) { return tpMfxPerDev_(x.per) ? dev : 1; };
+      var due = {};
+      rows.forEach(function (x) { if (x.effect === 'upkeep' && x.res && x.value) due[x.res] = (due[x.res] || 0) + x.value * times(x); });
+      var short = Object.keys(due).filter(function (r) { return w.stock(nid, r) + 1e-9 < due[r]; });
+      if (short.length) {
+        self.log('Building effects', nid, 'Building dark', why + ' is dark this turn: its upkeep (' + short.map(function (r) { return due[r] + ' ' + r; }).join(', ') + ') could not be paid', 'Yes', '');
+        return;
+      }
+      Object.keys(due).forEach(function (r) { self.ledger('Upkeep', nid, r, -tpRound2_(due[r]), why, 'Upkeep ' + tpRound2_(due[r]) + ' ' + r + ' a turn', ''); });
+      self.mfxLit.push({ nid: nid, sid: s.id, item: name, label: label, rows: rows });
+      rows.forEach(function (x) {
+        if (x.effect === 'yield_mult' && x.res) {
+          var basev = tpNum_(s.get(x.res)), amt = tpRound2_(basev * x.value);
+          if (amt) self.ledger('Income', nid, x.res, amt, why, label + ' yields ' + basev + ' ' + x.res + ' (Systems); ' + tpSigned_(x.value * 100) + '% = ' + tpSigned_(amt), '');
+        } else if (x.effect === 'yield_add' && x.res) {
+          var amt2 = tpRound2_(x.value * times(x));
+          if (amt2) self.ledger('Income', nid, x.res, amt2, why, x.value + (tpMfxPerDev_(x.per) ? ' x Development ' + dev : '') + ' = ' + amt2, '');
+        } else if (x.effect === 'convert' && x.res) {
+          var input = tpMfxCosts_(x.input), steps = times(x), can = steps;
+          Object.keys(input).forEach(function (r) { if (input[r] > 0) can = Math.min(can, Math.floor((w.stock(nid, r) + 1e-9) / input[r])); });
+          if (can <= 0) { self.log('Building effects', nid, 'Conversion idle', why + ': nothing converted this turn (short of ' + tpCostText_(input) + ')', 'Yes', ''); return; }
+          var wk = can + ' of ' + steps + ' step' + (steps === 1 ? '' : 's') + (tpMfxPerDev_(x.per) ? ' (1 per Development level)' : '') + ': ' +
+            Object.keys(input).map(function (r) { return tpRound2_(input[r] * can) + ' ' + r; }).join(' and ') + ' into ' + tpRound2_(x.value * can) + ' ' + x.res + (can < steps ? '; limited by stock' : '');
+          Object.keys(input).forEach(function (r) { self.ledger('Upkeep', nid, r, -tpRound2_(input[r] * can), why, wk, ''); });
+          self.ledger('Income', nid, x.res, tpRound2_(x.value * can), why, wk, '');
+        }
+      });
+    });
+  });
+};
+
+/** World toll: a lit building with strain_capacity bears that much more Strain before Degradation accrues, and one
+ *  with heal recovers that much Degradation a turn while Strain is within the raised capacity, on any world. The
+ *  Systems formulas do not know the building, so the difference is written as Degradation lines under the system's ID. */
+tpResolver_.prototype.mfxWorldToll = function () {
+  var self = this, w = this.world;
+  (this.mfxLit || []).forEach(function (b) {
+    var bonus = 0, heal = 0;
+    b.rows.forEach(function (x) { if (x.effect === 'strain_capacity') bonus += x.value; else if (x.effect === 'heal') heal += x.value; });
+    if (!bonus && !heal) return;
+    if (w.systemsTab.c('Strain') < 0 || w.systemsTab.c('Capacity') < 0) { self.log('World toll', b.nid, 'Write by hand', b.item + ' at ' + b.label + ': Systems has no Strain or Capacity column; apply its effect by hand', 'No', ''); return; }
+    var t = self.startToll[b.sid], strain = t.strain, cap = t.cap + bonus, why = b.item + ' at ' + b.label, parts = [], cut = 0;
+    if (t.change > 0 && bonus) {
+      cut = strain <= cap ? t.change : Math.min(t.change, bonus);
+      parts.push('Strain ' + strain + ', Capacity ' + t.cap + ' + ' + bonus + ' = ' + cap + ': ' + tpRound2_(cut) + ' of this turn\'s +' + t.change + ' does not accrue');
+    }
+    if (heal && strain <= cap) {
+      var already = t.change < 0 ? -t.change : 0, more = Math.max(0, heal - already);
+      if (more) { cut += more; parts.push('Strain within Capacity ' + cap + ': recovers ' + heal + ' a turn' + (already ? ' (' + already + ' already recovered)' : '')); }
+    }
+    cut = Math.min(cut, Math.max(0, self.degradationNow(b.sid)));
+    if (cut > 0) self.ledger('World toll', b.sid, 'Degradation', -tpRound2_(cut), why, parts.join('; '), '');
+  });
+};
+
+/** Holdings, each turn after Synthesis. Dangerous stocks (Holding rows "danger": Value = % a turn) not covered by
+ *  containment (Holding rows "containment": units contained per unit held; a lit building with
+ *  "unlimited_containment" covers all) roll for an incident; Thinking Machines roll at the chance of the nation's
+ *  fiscal line (Fiscal rows "thinking") plus every thinking product held (Holding and Building rows "thinking").
+ *  An event raises a GM-only Rulings row for the next turn; nothing is applied. */
+tpResolver_.prototype.phaseHoldings = function () {
+  var self = this, w = this.world, turn = this.turn;
+  if (!(w.mfx || []).length) return;
+  var hold = w.mfxFor('holding'), lit = this.mfxLit || [];
+  w.activeNations().forEach(function (n) {
+    var nm = n.name || n.id;
+    // Danger
+    var danger = {}, room = 0;
+    hold.forEach(function (x) {
+      var held = Math.floor(w.stock(n.id, x.item) + 1e-9);
+      if (held <= 0) return;
+      if (x.effect === 'danger') danger[x.item] = { item: x.item, held: held, chance: Math.max((danger[x.item] || {}).chance || 0, x.value) };
+      else if (x.effect === 'containment') room += held * x.value;
+    });
+    var unlimited = lit.some(function (b) { return b.nid === n.id && b.rows.some(function (x) { return x.effect === 'unlimited_containment'; }); });
+    Object.keys(danger).map(function (k) { return danger[k]; }).sort(function (a, b) { return b.chance - a.chance || (a.item < b.item ? -1 : 1); }).forEach(function (d) {
+      var contained = unlimited ? d.held : Math.min(d.held, Math.floor(room + 1e-9));
+      room -= contained;
+      var loose = d.held - contained;
+      if (loose <= 0 || d.chance <= 0) return;
+      var roll = tpMfxRoll_(turn, 'danger|' + n.id + '|' + tpNorm_(d.item)), pct = tpRound2_(roll * 100), hit = pct < d.chance;
+      self.logRoll('Holdings', n.id, hit ? 'Material incident' : 'Material held safely', nm + ': ' + loose + ' ' + d.item + ' uncontained (' + d.held + ' held); ' + (hit ? 'an incident' : 'no incident') + ' (chance ' + d.chance + '%)', pct + ' (under ' + d.chance + ' = incident)');
+      if (hit) tpAddRuling_(self.R, turn + 1, n.id, 'Danger: ' + d.item, 'Material incident: ' + nm + ', ' + loose + ' uncontained ' + d.item,
+        'GM only. An uncontained dangerous material had an incident in Turn ' + turn + ' (' + d.held + ' held, ' + contained + ' contained; roll ' + pct + ' under ' + d.chance + '%).',
+        'Adjudicate the incident and apply its consequences by hand; nothing has been applied.');
+    });
+    // Thinking Machines
+    var base = w.mfxFiscalChance(n.id, 'thinking');
+    if (base === null) return;
+    var add = 0, parts = [];
+    hold.forEach(function (x) { if (x.effect !== 'thinking') return; var held = Math.floor(w.stock(n.id, x.item) + 1e-9); if (held > 0) { add += held * x.value; parts.push(held + ' ' + x.item); } });
+    lit.forEach(function (b) { if (b.nid !== n.id) return; b.rows.forEach(function (x) { if (x.effect === 'thinking') { add += x.value; parts.push(b.item + ' at ' + b.label); } }); });
+    var chance = Math.min(100, tpRound2_(base + add)), roll = tpMfxRoll_(turn, 'thinking|' + n.id), pct2 = tpRound2_(roll * 100), hit2 = pct2 < chance;
+    self.logRoll('Holdings', n.id, hit2 ? 'Thinking Machines event' : 'Thinking Machines quiet', nm + ': chance ' + chance + '% (fiscal ' + base + '%' + (parts.length ? '; thinking products: ' + parts.join(', ') : '') + ')', pct2 + ' (under ' + chance + ' = event)');
+    if (hit2) tpAddRuling_(self.R, turn + 1, n.id, 'Thinking Machines', 'Thinking Machines event: ' + nm + ', chance ' + chance + '%',
+      'GM only. Rolled ' + pct2 + ' under ' + chance + '% in Turn ' + turn + ' (fiscal ' + base + '%' + (add ? ', thinking products +' + tpRound2_(add) + '%' : '') + ').',
+      'Set the event on the ladder by hand; nothing has been applied. Never show the chance to the player.');
+  });
+};
+
+/** After Upkeep: fittings that cut fuel (fuel_mult) return the Energy the fleet's fitted ships did not burn. */
+tpResolver_.prototype.phaseFittingFuel = function () {
+  var self = this, w = this.world, F = w.forcesTab;
+  if (F.c(TURN_CONFIG.FITTINGS_COLUMN) < 0 || !w.mfxFor('fitting').some(function (x) { return x.effect === 'fuel_mult'; })) return;
+  w.forceList().forEach(function (f) {
+    var nat = w.nation(f.owner);
+    if (!nat || nat.status === 'Eliminated' || nat.status === '') return;
+    var ships = w.fittedShips(f.row);
+    if (!ships.length) return;
+    var full = 0, saved = 0, items = [];
+    Object.keys(TURN_CONFIG.SHIP_COLUMNS).forEach(function (cat) { if (cat === 'Transport') return; var c = w.shipCategory(cat); full += tpNum_(F.get(f.row, TURN_CONFIG.SHIP_COLUMNS[cat])) * (c ? c.capacity : 0); });
+    ships.forEach(function (e) {
+      w.mfxFor('fitting', e.item).forEach(function (x) {
+        if (x.effect !== 'fuel_mult' || !tpMfxClassOk_(x, e.cls) || !e.nEff) return;
+        saved += -x.value * e.nEff * e.capacity;
+        if (items.indexOf(e.item) < 0) items.push(e.item);
+      });
+    });
+    if (saved <= 0) return;
+    var before = Math.ceil(full / 4 - 1e-9), after = Math.ceil(Math.max(0, full - saved) / 4 - 1e-9), refund = before - after;
+    if (refund > 0) self.ledger('Upkeep', f.owner, 'Energy', refund, 'Fuel saved by ' + items.join(', ') + ' (' + f.id + ')',
+      'Fuel 1 Energy per 4 ship capacity: ' + tpRound2_(full) + ' capacity -> ' + before + '; fitted ships burn ' + tpRound2_(saved) + ' capacity less -> ' + after + '; ' + refund + ' returned', '');
+  });
+};
+
+/** After Completions: Forces "Fitted Fleet Power" for every force with fittings recorded. */
+tpResolver_.prototype.phaseFittedPower = function () {
+  var w = this.world, F = w.forcesTab, col = TURN_CONFIG.FITTINGS_COLUMN, fpc = TURN_CONFIG.FITTED_FP_COLUMN;
+  if (F.c(col) < 0) return;
+  F.rows().forEach(function (r) {
+    if (!String(F.get(r, 'Force ID') || '').trim() || !String(F.get(r, col) || '').trim()) return;
+    var fp = w.fittedFleetPower(r);
+    F.ensureColumn(fpc);
+    F.set(r, fpc, fp.fitted);
+  });
+};
+/** New fitted ships merged into a force: counts kept per fitting and ship class. */
+tpResolver_.prototype.addFittings = function (row, cat, n, items) {
+  var w = this.world, F = w.forcesTab, col = TURN_CONFIG.FITTINGS_COLUMN;
+  F.ensureColumn(col);
+  var list = tpFitParse_(w, F.get(row, col));
+  items.forEach(function (item) {
+    var hit = list.filter(function (e) { return tpNorm_(e.item) === tpNorm_(item) && e.cls === cat; })[0];
+    if (hit) hit.n += n; else list.push({ item: item, cls: cat, n: n });
+  });
+  F.set(row, col, tpFitText_(list));
+};
+
+/** An applied USE order: each effect its rows give. The material was charged with the order's cost. */
+tpResolver_.prototype.applyUse = function (a, sp) {
+  var self = this, w = this.world, n = a.nation, turn = this.turn, lines = [], label = sp.sys ? w.label(sp.sys) : '';
+  (sp.effects || []).forEach(function (e) {
+    switch (e.type) {
+      case 'standing_add':
+        for (var k = 0; k < e.apps; k++) {
+          self.model.tab('Standing effects').add('Nation', { 'Nation': n, 'Resource': e.res, 'Amount per turn': e.amount, 'Phase': e.amount > 0 ? 'Income' : 'Upkeep',
+            'Reason': sp.item + ' at ' + label, 'Working': sp.item + ' used on Actions row ' + a.actionNo + ' (Turn ' + turn + '); system ' + sp.sys,
+            'From turn': turn + 1, 'Until turn': '', 'Group': '', 'Active': 'Yes', 'Source': 'Material effects' });
+        }
+        self.log('Spending', n, 'Material used', sp.item + ' at ' + label + ': ' + tpSigned_(e.amount * e.apps) + ' ' + e.res + ' a turn from Turn ' + (turn + 1), 'No', a.actionNo);
+        break;
+      case 'develop_discount':
+        self.log('Spending', n, 'Material used', sp.item + ' on the Development of ' + label + ': ' + e.refund + ' Industry returned', 'No', a.actionNo);
+        break;
+      case 'system_ledger': case 'system_record':
+        var amt = e.amount;
+        if (e.res === 'Degradation' && amt < 0) amt = -Math.min(-amt, Math.max(0, self.degradationNow(sp.sys)));
+        if (amt) lines.push(self.ledger('Spending', sp.sys, e.res, tpRound2_(amt), sp.item + ' used by ' + n, sp.n + ' ' + sp.item + ' on ' + label, a.actionNo));
+        if (e.type === 'system_record') tpAddRuling_(self.R, turn + 1, n, 'Material effects', sp.item + ' at ' + label + ' (Turn ' + turn + ', Actions row ' + a.actionNo + ')',
+          'Recorded on the Ledger under ' + sp.sys + ' as ' + e.res + ' ' + tpSigned_(e.amount) + '; the sheet does not apply it by itself.', e.notes || 'Apply the effect by hand.');
+        self.log('Spending', n, 'Material used', sp.item + ' on ' + label + ': ' + e.res + ' ' + tpSigned_(amt), 'No', a.actionNo);
+        break;
+      case 'gain':
+        lines.push(self.ledger('Income', n, e.res, e.amount, sp.item + ' used', sp.n + ' ' + sp.item, a.actionNo));
+        break;
+    }
+  });
+  return lines;
 };
 
 // ---------------- The Galactic Exchange (after Income, before Spending) ----------------
@@ -3297,6 +3713,7 @@ function tpWorld_(model) {
       (self.advByNation[nid] = self.advByNation[nid] || []).push(nm);
     });
   } catch (e) { /* no Recipes tab */ }
+  this.loadMfx_();
   // Nations
   this.nations = [];
   var N = this.nationsTab;
@@ -3900,11 +4317,139 @@ tpWorld_.prototype.disbandDreadnoughts = function (nid, count) {
   return done;
 };
 
+// ---------- Material effects (GM-only tab, read at run time) ----------
+/** Reads the Material effects tab: one effect per row. A missing or empty tab gives no rows, and nothing changes. */
+tpWorld_.prototype.loadMfx_ = function () {
+  var T = tpTryTab_(this.model, 'Material effects'), rows = [];
+  if (T && T.rows) T.rows().forEach(function (r) {
+    var item = String(T.get(r, 'Item') || '').trim(), applies = tpNorm_(T.get(r, 'Applies')).replace(/s$/, '');
+    var effect = tpNorm_(T.get(r, 'Effect')).replace(/[\s-]+/g, '_');
+    if (!item || !applies || !effect) return;
+    var cls = String(T.get(r, 'Ship classes') || '').split(/\s*(?:[,;\/&]|\band\b)\s*/i).map(function (x) { return tpNorm_(x).replace(/s$/, ''); }).filter(function (x) { return x; });
+    rows.push({ row: r, item: item, key: tpNorm_(item), applies: applies, effect: effect, res: tpMfxRes_(T.get(r, 'Resource')), value: tpNum_(T.get(r, 'Value')),
+      units: tpNum_(T.get(r, 'Units')), per: String(T.get(r, 'Per') || '').trim(), cap: tpNum_(T.get(r, 'Cap')), classes: cls,
+      input: String(T.get(r, 'Input') || '').trim(), requires: String(T.get(r, 'Requires') || '').trim(), notes: String(T.get(r, 'Notes') || '').trim() });
+  });
+  this.mfx = rows;
+  // Materials named here are Ledger resources, as recipe products are.
+  rows.forEach(function (x) { if (x.applies !== 'building' && x.applies !== 'fiscal' && !TP_ADV_[x.key]) TP_ADV_[x.key] = x.item; });
+};
+/** Rows for one kind of item (building, use, fitting, holding, fiscal), optionally for one item by name. */
+tpWorld_.prototype.mfxFor = function (applies, name) {
+  var k = name === undefined ? null : tpNorm_(name), kb = k === null ? null : tpMfxBase_(name);
+  return (this.mfx || []).filter(function (x) { return x.applies === applies && (k === null || x.key === k || x.key === kb || x.key === k.replace(/s$/, '')); });
+};
+tpWorld_.prototype.mfxMaterials = function () {
+  var out = [];
+  (this.mfx || []).forEach(function (x) { if (x.applies !== 'building' && x.applies !== 'fiscal' && out.indexOf(x.item) < 0) out.push(x.item); });
+  return out;
+};
+/** Standing effects rows a USE has written for an item in a system (rows starting this turn or earlier). */
+tpWorld_.prototype.mfxStanding = function (nid, item, sid) {
+  var T = tpTryTab_(this.model, 'Standing effects'), turn = this.turnNo || 0, out = { count: 0, total: 0 };
+  if (!T) return out;
+  var re = new RegExp('(^|[^A-Za-z0-9-])' + tpEscapeRe_(sid) + '([^A-Za-z0-9-]|$)'), k = tpNorm_(item) + ' at ';
+  T.rows().forEach(function (r) {
+    if (String(T.get(r, 'Nation')).trim() !== nid || !/^y/i.test(String(T.get(r, 'Active'))) || String(T.get(r, 'Source')).trim() !== 'Material effects') return;
+    var from = T.get(r, 'From turn'), until = T.get(r, 'Until turn'), reason = String(T.get(r, 'Reason') || '');
+    if ((from !== '' && turn && tpNum_(from) > turn) || (until !== '' && turn && turn > tpNum_(until))) return;
+    if (tpNorm_(reason).indexOf(k) !== 0 || !re.test(reason)) return;
+    out.count++; out.total += tpNum_(T.get(r, 'Amount per turn'));
+  });
+  return out;
+};
+/** True when the Ledger already holds a line of this resource for this item under the system's ID. */
+tpWorld_.prototype.mfxLedgerOnce = function (sid, res, item) {
+  var L = this.ledgerTab, k = tpNorm_(item);
+  return L.rows().some(function (r) { return L.get(r, 'Nation') === sid && L.get(r, 'Resource') === res && tpNorm_(L.get(r, 'Reason')).indexOf(k) === 0; });
+};
+/** A fitting's units per ship and the ship classes it may go on (the union of its rows' classes; none = any). */
+tpWorld_.prototype.fittingSpec = function (name) {
+  var rows = this.mfxFor('fitting', name), cls = [];
+  rows.forEach(function (x) { x.classes.forEach(function (c) { if (cls.indexOf(c) < 0) cls.push(c); }); });
+  return { item: rows.length ? rows[0].item : String(name), units: Math.max.apply(null, [1].concat(rows.map(function (x) { return x.units || 0; }))), classes: cls, rows: rows };
+};
+/** A force's fitted ships: each Fittings entry with the ships of its class still present (nEff), their power and capacity. */
+tpWorld_.prototype.fittedShips = function (row) {
+  var F = this.forcesTab, col = TURN_CONFIG.FITTINGS_COLUMN, self = this;
+  if (F.c(col) < 0 || !String(F.get(row, col) || '').trim()) return [];
+  var counts = {}, total = 0, pw = 0, cp = 0;
+  Object.keys(TURN_CONFIG.SHIP_COLUMNS).forEach(function (cat) {
+    if (cat === 'Transport') return;
+    var n = tpNum_(F.get(row, TURN_CONFIG.SHIP_COLUMNS[cat])), c = self.shipCategory(cat);
+    counts[cat] = n; total += n; pw += n * (c ? c.power : 0); cp += n * (c ? c.capacity : 0);
+  });
+  return tpFitParse_(this, F.get(row, col)).map(function (e) {
+    var known = e.cls && counts[e.cls] !== undefined, c = known ? self.shipCategory(e.cls) : null;
+    // A fitting recorded without its class is taken as on the force's average ship.
+    return { item: e.item, cls: known ? e.cls : '', n: e.n, nEff: Math.min(e.n, known ? counts[e.cls] : total),
+      power: c ? c.power : (total ? pw / total : 0), capacity: c ? c.capacity : (total ? cp / total : 0) };
+  });
+};
+function tpMfxClassOk_(x, cls) { return !x.classes.length || !cls || x.classes.indexOf(tpNorm_(cls)) >= 0; }
+/** Fleet Power of a force before and after its fittings. */
+tpWorld_.prototype.fittedFleetPower = function (row) {
+  var F = this.forcesTab, self = this, base = 0, add = 0, perN = {};
+  Object.keys(TURN_CONFIG.SHIP_COLUMNS).forEach(function (cat) { var c = self.shipCategory(cat); base += tpNum_(F.get(row, TURN_CONFIG.SHIP_COLUMNS[cat])) * (c ? c.power : 0); });
+  this.fittedShips(row).forEach(function (e) {
+    self.mfxFor('fitting', e.item).forEach(function (x) {
+      if (!tpMfxClassOk_(x, e.cls)) return;
+      if (x.effect === 'fp_mult') add += x.value * e.nEff * e.power;
+      else if (x.effect === 'fp_add') add += x.value * e.nEff;
+      else if (x.effect === 'fp_per_n') { var k = x.item + '|' + x.row; perN[k] = perN[k] || { x: x, n: 0 }; perN[k].n += e.nEff; }
+    });
+  });
+  Object.keys(perN).forEach(function (k) { var o = perN[k]; add += o.x.value * Math.floor(o.n / tpMfxPerN_(o.x.per) + 1e-9); });
+  return { base: tpRound2_(base), fitted: tpRound2_(base + add) };
+};
+/** Military Capacity a nation's fitted ships do not use (capacity_mult fittings). */
+tpWorld_.prototype.mfxCapacityRelief = function (nid) {
+  if (!this.mfxFor('fitting').some(function (x) { return x.effect === 'capacity_mult'; }) || this.forcesTab.c(TURN_CONFIG.FITTINGS_COLUMN) < 0) return 0;
+  var self = this, relief = 0;
+  this.forceList().forEach(function (f) {
+    if (f.owner !== nid) return;
+    self.fittedShips(f.row).forEach(function (e) {
+      self.mfxFor('fitting', e.item).forEach(function (x) { if (x.effect === 'capacity_mult' && tpMfxClassOk_(x, e.cls)) relief += -x.value * e.nEff * e.capacity; });
+    });
+  });
+  return tpRound2_(relief);
+};
+/** What a force's fittings do to its movement: moves a turn, jump range %, and notes for the GM. */
+tpWorld_.prototype.mfxForceMove = function (f) {
+  var out = { moves: 1, rangePct: 0, notes: [] }, self = this;
+  if (!this.mfxFor('fitting').length || this.forcesTab.c(TURN_CONFIG.FITTINGS_COLUMN) < 0) return out;
+  var by = {}, total = (f.ships || 0) + (f.transports || 0);
+  tpFitParse_(this, this.forcesTab.get(f.row, TURN_CONFIG.FITTINGS_COLUMN)).forEach(function (e) { by[e.item] = (by[e.item] || 0) + e.n; });
+  Object.keys(by).forEach(function (item) {
+    var rows = self.mfxFor('fitting', item), all = total > 0 && by[item] >= total;
+    rows.forEach(function (x) {
+      if (x.effect === 'range_pct' && all) out.rangePct += x.value;
+      else if (x.effect === 'double_move' && all) out.moves = Math.max(out.moves, 2);
+    });
+    if (rows.some(function (x) { return x.effect === 'flag'; })) out.notes.push('carries ' + item + ' (' + Math.min(by[item], total) + ' of ' + total + ' ships)');
+  });
+  return out;
+};
+/** The chance a fiscal line gives (Applies Fiscal rows), or null when the nation has no such line. */
+tpWorld_.prototype.mfxFiscalChance = function (nid, effect) {
+  var rows = this.mfxFor('fiscal').filter(function (x) { return x.effect === effect; });
+  if (!rows.length) return null;
+  var T = tpTryTab_(this.model, 'Fiscal'), best = null;
+  if (!T) return null;
+  T.rows().forEach(function (r) {
+    if (String(T.get(r, 'Nation ID')).trim() !== nid) return;
+    var ins = tpNorm_(T.get(r, 'Instrument')), inten = tpNorm_(T.get(r, 'Intensity'));
+    rows.forEach(function (x) { if (x.key === ins && (!x.per || tpNorm_(x.per) === inten)) best = Math.max(best || 0, x.value); });
+  });
+  return best;
+};
+
 /** The projected state of one nation while its orders are read in the order written. */
 tpWorld_.prototype.newSim = function (n, phase, resolver) {
   var self = this, c = this.calc(n.id) || {};
   var stock;
   var adv = (this.advByNation && this.advByNation[n.id]) || [];   // the nation's advanced materials, priced from the Ledger
+  adv = adv.concat(this.mfxMaterials()).filter(function (r, i, a) { return a.indexOf(r) === i && TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC, [TURN_CONFIG.MARKS]).indexOf(r) < 0; });
   if (phase === 'prepare') { stock = this.projectedStock(n.id); stock[TURN_CONFIG.MARKS] = tpRound2_(this.stock(n.id, TURN_CONFIG.MARKS) + (stock[TURN_CONFIG.MARKS] || 0));
     adv.forEach(function (r) { if (stock[r] === undefined) stock[r] = self.stock(n.id, r); }); }
   else {
@@ -4061,6 +4606,18 @@ tpTab_.prototype.add = function (keyHeader, obj) {
   Object.keys(obj).forEach(function (h) { if (self.c(h) >= 0) self.set(r, h, obj[h]); });
   this.lastAdded = r;
   return r;
+};
+/** Adds a column at the right of the tab when it is missing (Live: the header cell is written at once). */
+tpTab_.prototype.ensureColumn = function (header) {
+  if (this.c(header) >= 0) return;
+  this.headers.push(header); this.width = this.headers.length; this.colCache = {};
+  if (this.values[0]) this.values[0][this.width - 1] = header;
+  if (this.formulas[0]) this.formulas[0][this.width - 1] = '';
+  if (this.sheet && !this.model.dry) {
+    var maxC = this.sheet.getMaxColumns();
+    if (maxC < this.width) this.sheet.insertColumnsAfter(maxC, this.width - maxC);
+    this.sheet.getRange(1, this.width).setValue(header).setFontWeight('bold');
+  } else if (this.model.previewRows) this.model.previewRows.push([new Date(), this.name, 1, header, '', header, 'Column would be added']);
 };
 tpTab_.prototype.commit = function () {
   var self = this, model = this.model;
