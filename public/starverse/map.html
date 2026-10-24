@@ -49,8 +49,19 @@ a{color:var(--steel)}
 .tog:hover{color:var(--bright)}
 #hint{font-size:11px;color:var(--muted)}
 /* legend */
-#legend{right:16px;bottom:16px;padding:12px 14px;width:240px;max-height:42vh;overflow:auto}
-#legend h3{margin:0 0 8px;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--steel)}
+/* the Powers: a bar along the bottom centre, clear of the controls (left) and the system panel (right) */
+#legend{left:50%;transform:translateX(-50%);bottom:16px;width:max-content;max-width:calc(100vw - 720px);max-height:24vh;overflow:auto;padding:8px 16px;display:flex;flex-direction:column;align-items:center;gap:6px}
+#legend h3{margin:0;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--steel)}
+#nations{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px 16px}
+#nations::before{content:'Powers';font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--steel);font-weight:700;margin-right:4px}
+#legend h3{display:none}
+#legend .li{padding:2px 0}
+#legend .li .n{margin-left:6px}
+#legend .key{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:4px 6px;margin:0;padding:6px 0 0;border-top:1px solid var(--line2);font-size:11.5px}
+#legend .key i{margin:0}
+#legend .key b{margin:0 0 0 2px}
+#legend .key span{margin-right:10px}
+@media (min-width:761px) and (max-width:1180px){#legend{bottom:auto;top:16px;max-width:calc(100vw - 680px)}}
 .li{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;cursor:pointer}
 .li:hover{color:var(--bright)}
 .sw{width:11px;height:11px;border-radius:50%;flex:none;box-shadow:0 0 8px currentColor}
@@ -117,7 +128,7 @@ body.backdrop .ui,body.backdrop #tip,body.backdrop #menuBtn,body.backdrop #label
   #controls{right:16px;width:auto;bottom:12px;left:12px;display:none}
   body.panel #controls{display:flex}
   #legend{display:none}
-  body.panel #legend{display:block;bottom:auto;top:110px;right:12px;left:12px;width:auto;max-height:30vh}
+  body.panel #legend{display:flex;bottom:auto;top:110px;right:12px;left:12px;width:auto;max-width:none;transform:none;max-height:30vh}
   #card{top:auto;bottom:12px;left:12px;right:12px;width:auto;max-height:55vh}
   #menuBtn{display:block;position:fixed;z-index:6;right:12px;bottom:12px;width:46px;height:46px;border-radius:50%;background:#13233A;border:1px solid var(--line);color:var(--chrome);font-size:18px}
   body.panel #menuBtn{bottom:auto;top:16px;right:16px}
@@ -166,7 +177,7 @@ body.backdrop .ui,body.backdrop #tip,body.backdrop #menuBtn,body.backdrop #label
     <i style="border-color:#B9D3EA"></i><span>Gateway between Sectors</span>
     <i style="border-color:#E8D7A8;border-top-style:dashed"></i><span>Core link</span>
     <b style="background:#7E92AC"></b><span>Uncharted star</span>
-    <b style="background:transparent;box-shadow:inset 0 0 0 1.5px #E8F0F8"></b><span>Leased: ring in the sovereign's colour</span>
+    <b style="background:transparent;box-shadow:inset 0 0 0 1.5px #E8F0F8"></b><span>Leased (sovereign's ring)</span>
   </div>
 </div>
 
