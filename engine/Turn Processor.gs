@@ -196,7 +196,7 @@ var TURN_CONFIG = {
   REMEDIATION_INDUSTRY_PER_POINT: 2,
   REMEDIATION_MAX_POINTS: 10,
   STIPEND: { resource: 'Living compounds', units: 2, reason: 'Living compounds stipend: +1 Stability target' },
-  CHARTER: { max: 2, society: 4, societyCollective: 3, influencePerSystem: 3, divisor: 5 },
+  CHARTER: { max: 0, society: 4, societyCollective: 3, influencePerSystem: 3, divisor: 5 },
   // Nations columns written by the stipend and by charters (skipped with a Turn log line if missing).
   TEMP_TARGET_COLUMN: 'Temporary Stability target',
   ADMIN_CAPACITY_COLUMN: 'Species Admin Capacity',
@@ -1907,18 +1907,21 @@ function tpEvStipend_(world, sim, t) {
     TURN_CONFIG.TEMP_TARGET_COLUMN + '); lapses in any turn it is not paid', {}, strat, { type: 'STIPEND' });
 }
 
-// Rules: from Society Tier 4 (a Collective from Tier 3) up to two charters, each +1 Administrative
+// Rules: from Society Tier 4 (a Collective from Tier 3) any number of charters (no limit since Turn 35), each +1 Administrative
 // Capacity, upkeep 3 Influence x systems held / 5 each a turn, lapsing in any turn it is not paid.
 function tpEvCharters_(world, sim, t) {
   var C = TURN_CONFIG.CHARTER;
   if (/\b(?:drop|end|cancel|give up|relinquish|abandon)\b/i.test(t)) return tpRuling_('Giving up a charter', 'Ending a charter lowers Administrative Capacity', 'Set the charter row on Standing effects inactive and lower ' + TURN_CONFIG.ADMIN_CAPACITY_COLUMN + ' by 1.');
-  var want = /\b(?:two|2|both)\b/i.test(t) ? 2 : 1;
+  var WORDS = { one: 1, two: 2, both: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  var wm = t.match(/\b(\d+|one|two|both|three|four|five|six|seven|eight|nine|ten)\b(?=[^.;]*\bcharters?\b)|\bcharters?\b[^.;]*?\b(\d+|one|two|both|three|four|five|six|seven|eight|nine|ten)\b/i);
+  var wv = wm ? (wm[1] || wm[2]).toLowerCase() : '';
+  var want = Math.max(1, Math.min(20, wv ? (WORDS[wv] || Number(wv) || 1) : 1));
   var collective = sim.gov === 'Collective', need = collective ? C.societyCollective : C.society;
   if (sim.tiers.Society < need) return tpRuling_('Charters need Society Tier ' + need + (collective ? ' (Collective)' : '') + '; Society Tier ' + sim.tiers.Society + ' now',
     'The tier is not reached as the orders are read (a tier researched this turn arrives at the end of the turn)', 'Carry the order to the next turn, or reject it.', { details: t });
   var held = world.standingRows(sim.nid, function (r) { return /^charter\b/i.test(r.reason); }).length + (sim.charters || 0);
-  if (held >= C.max) return tpReject_('Already holds ' + held + ' charters; at most ' + C.max);
-  var take = Math.min(want, C.max - held);
+  if (C.max && held >= C.max) return tpReject_('Already holds ' + held + ' charters; at most ' + C.max);
+  var take = C.max ? Math.min(want, C.max - held) : want;
   var systems = Object.keys(sim.owned).length;
   var each = tpRound1_(C.influencePerSystem * systems / C.divisor);
   return tpReady_(take + ' charter' + (take > 1 ? 's' : '') + ': +' + take + ' Administrative Capacity',
