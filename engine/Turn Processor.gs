@@ -1525,7 +1525,19 @@ function tpEvTreaty_(world, sim, args) {
     return tpRuling_('Treaty touching war, peace, alliance or vassalage', 'These carry consequences the GM rules', 'Deliver it and rule the terms; record any treaty on the Treaties tab.', { details: details });
   }
   var decline = /^\s*(?:decline|reject|refuse)s?\b/i.test(text);
+  // A line that proposes or accepts a trade agreement (not one that merely mentions one, or ends one).
+  var isTrade = /(?:^|[:;,.]|\s-\s|\b(?:propose|proposes|proposing|accept|accepts|accepting|offer|offers|sign|signs)\b)\s*(?:a\s+|the\s+|our\s+|your\s+)?trade\s+agreements?\b/i.test(text) &&
+    !/\bnot\s+a\s+trade\s+agreement\b/i.test(text) && !/\b(?:end|ends|ending|cancel|terminate|withdraw)\b[^.;]*\btrade\s+agreement/i.test(text);
   if (!decline && (/^\s*(?:we\s+)?(?:accept|agree|ratif|sign|confirm)/i.test(text) || /\baccept(?:s|ed|ing)?\b|\bratif(?:y|ies|ied)\b/i.test(text))) {
+    if (isTrade) {
+      // Trade slots (rules: Trade): a trade agreement needs a free slot on both sides.
+      var mineS = tpTradeSlots_(world, sim.nid, sim), theirs = tpTradeSlots_(world, to.id, null);
+      if (mineS.free <= 0) return tpReject_('No free trade slot: ' + mineS.used + ' of ' + mineS.slots + ' in use. End an agreement first (TREATY <nation>: end the trade agreement), or open a slot (Trade Hub, Trade Exchange)');
+      if (theirs.free <= 0) return tpReject_(to.name + ' has no free trade slot (' + theirs.used + ' of ' + theirs.slots + ' in use); the agreement cannot be made until it frees one');
+      sim.tradeTaken = (sim.tradeTaken || 0) + 1;
+      return tpRuling_('Treaty acceptance (trade agreement)', 'Accepting makes a treaty, with terms and effects the GM confirms',
+        'Slots checked: ' + me.name + ' ' + mineS.used + ' of ' + mineS.slots + ', ' + to.name + ' ' + theirs.used + ' of ' + theirs.slots + ' in use. If the other side\'s offer stands: record the trade agreement on the Treaties tab.', { details: details });
+    }
     return tpRuling_('Treaty acceptance', 'Accepting makes a treaty, with terms and effects the GM confirms', 'If the other side\'s offer stands: record the treaty on the Treaties tab.', { details: details });
   }
   // Contact: no action of any kind may be aimed at a nation before first contact.
@@ -1539,6 +1551,15 @@ function tpEvTreaty_(world, sim, args) {
     return tpReject_('No contact with ' + to.name);
   }
   var mode = decline ? 'reply' : 'proposal';
+  if (isTrade && !decline) {
+    // Tell both sides at once when a slot is lacking, so no one accepts what cannot be signed.
+    var ms = tpTradeSlots_(world, sim.nid, sim), ts = tpTradeSlots_(world, to.id, null), notes = [];
+    if (ts.free <= 0) notes.push(to.name + ' has no free trade slot (' + ts.used + ' of ' + ts.slots + ' in use): accepting means ending an agreement first');
+    else notes.push(to.name + ' has ' + ts.free + ' free trade slot' + (ts.free === 1 ? '' : 's') + ' (' + ts.used + ' of ' + ts.slots + ' in use)');
+    if (ms.free <= 0) notes.push(me.name + ' itself has no free slot (' + ms.used + ' of ' + ms.slots + ')');
+    body = String(body).replace(/\s*$/, '') + (/[.!?)]$/.test(String(body).trim()) ? ' ' : '. ') + '[' + notes.join('; ') + '.]';
+    details = (decline ? 'Reply to ' : 'Proposal to ') + to.name + ': ' + body;
+  }
   return tpReady_(details, (decline ? 'Reply delivered to ' : 'Proposal delivered to ') + to.name + '; answered next turn (in contact: ' + rec.how + ')',
     {}, {}, { type: 'TREATY', to: to.id, mode: mode, text: body });
 }
@@ -3094,6 +3115,12 @@ tpWorld_.prototype.contacts = function () {
   this._contacts = out;
   return out;
 };
+/** Trade slots of a nation: slots and agreements in use from Calculations, plus any accepted earlier this turn. */
+function tpTradeSlots_(world, nid, sim) {
+  var c = (world.calc && world.calc(nid)) || {};
+  var slots = tpNum_(c['Trade slots']), used = tpNum_(c['Trade agreements']) + ((sim && sim.tradeTaken) || 0);
+  return { slots: slots, used: used, free: slots - used };
+}
 tpWorld_.prototype.contactWith = function (a, b) { return this.contacts()[tpPairKey_(a, b)] || null; };
 tpWorld_.prototype.addContact = function (a, b, turn) { this.contacts()[tpPairKey_(a, b)] = { how: 'First contact, Turn ' + turn, turn: turn, made: true }; };
 /** Not contact, but a sign of it: b holds a system that a holds beside, or has discovered. Used to send
