@@ -3197,8 +3197,10 @@ tpResolver_.prototype.phaseBuildingEffects = function () {
       self.mfxLit.push({ nid: nid, sid: s.id, item: name, label: label, rows: rows });
       rows.forEach(function (x) {
         if (x.effect === 'yield_mult' && x.res) {
-          var basev = tpNum_(s.get(x.res)), amt = tpRound2_(basev * x.value);
-          if (amt) self.ledger('Income', nid, x.res, amt, why, label + ' yields ' + basev + ' ' + x.res + ' (Systems); ' + tpSigned_(x.value * 100) + '% = ' + tpSigned_(amt), '');
+          // The system's own yield, raised by the nation's output modifiers for that resource (Calculations '<resource> %'),
+          // so the bonus is worth what the system's output is worth to the nation.
+          var basev = tpNum_(s.get(x.res)), cc = w.calc(nid) || {}, modp = tpNum_(cc[x.res + ' %']), amt = tpRound2_(basev * x.value * (1 + modp / 100));
+          if (amt) self.ledger('Income', nid, x.res, amt, why, label + ' yields ' + basev + ' ' + x.res + ' (Systems) x ' + tpSigned_(x.value * 100) + '% x (1 ' + (modp < 0 ? '- ' : '+ ') + Math.abs(modp) + '% national modifiers) = ' + tpSigned_(amt), '');
         } else if (x.effect === 'yield_add' && x.res) {
           var amt2 = tpRound2_(x.value * times(x));
           if (amt2) self.ledger('Income', nid, x.res, amt2, why, x.value + (tpMfxPerDev_(x.per) ? ' x Development ' + dev : '') + ' = ' + amt2, '');
