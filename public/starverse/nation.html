@@ -516,7 +516,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   var BK_SITE = { 'Infantry': 'Barracks', 'Specialised Infantry': 'Barracks', 'Special Forces': 'Barracks', 'Armour': 'Vehicle Factory', 'Heavy Armour': 'Vehicle Factory', 'Artillery': 'Vehicle Factory', 'Heavy Artillery': 'Vehicle Factory' };
   var BK_VERBS = [
     ['BUILD', 'Build'], ['DEVELOP', 'Develop'], ['DESIGNATE', 'Designate'], ['RESEARCH', 'Research'], ['COLONIZE', 'Colonize'],
-    ['SHIP', 'Ships'], ['GROUND', 'Ground forces'], ['DEFENCE', 'Static Defence'], ['MOVE', 'Move a force'], ['STABILITY', 'Buy Stability']
+    ['SHIP', 'Ships'], ['GROUND', 'Ground forces'], ['DEFENCE', 'Static Defence'], ['MOVE', 'Move a force'], ['STABILITY', 'Buy Stability'], ['NAME', 'Name a system or world']
   ];
 
   function bkStore(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
@@ -671,6 +671,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         out.msg = 'Jump range ' + (kv('Jump range') || '?') + ' (' + (kv('Jump range with Volatile isotopes') || '?') + ' with Volatile isotopes).'; out.cls = 'ok';
         break;
       }
+      case 'NAME': {
+        var sn = bkSys(r.sys), nm = String(r.name || '').trim(), wd = String(r.world || '').trim();
+        if (!sn || !nm) { bad('Choose a system and write its new name.'); break; }
+        out.text = 'NAME ' + (wd ? wd + ' @ ' : '') + sn['System ID'] + ' AS ' + nm;
+        if (nm.length < 2 || nm.length > 40 || /[<>{}\[\]@#|\\\/=;,]/.test(nm)) bad('A name is 2 to 40 characters: letters, spaces, apostrophes or hyphens.');
+        else { out.msg = 'Free · ' + (wd ? 'names the world ' + wd : 'names the system; its worlds still called by its ID take the new name'); out.cls = 'ok'; }
+        break;
+      }
       case 'USE': {
         var uq = Math.max(1, Math.round(num(r.qty) || 1));
         if (!r.what || !String(r.purpose || '').trim()) { bad('Choose a material and say how it is used.'); break; }
@@ -751,6 +759,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       case 'MOVE':
         f = '<select data-f="what">' + bkOpt(BK.forces.map(function (x) { return [x['Force ID'], (x['Name'] ? x['Name'] + ' ' : '') + x['Force ID'] + ' · at ' + (x['Location'] || '?')]; }), r.what, 'Force…') + '</select> to ' +
           '<input data-f="dest" placeholder="System ID, e.g. II-15" value="' + esc(r.dest || '') + '" style="width:150px">';
+        break;
+      case 'NAME':
+        f = '<select data-f="sys">' + bkOpt(bkHeld(), r.sys, 'System…') + '</select> ' +
+          '<input data-f="world" placeholder="World (blank for the system), e.g. IV" value="' + esc(r.world || '') + '" style="min-width:200px"> ' +
+          '<input data-f="name" placeholder="New name" value="' + esc(r.name || '') + '" style="min-width:180px">';
         break;
       case 'USE':
         f = '<input type="number" min="1" step="1" data-f="qty" value="' + esc(r.qty || 1) + '"> × ' +

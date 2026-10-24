@@ -178,8 +178,8 @@ var TURN_CONFIG = {
 
   VERBS: ['DEVELOP', 'DESIGNATE', 'BUILD', 'SHIP', 'GROUND', 'DEFENCE', 'RESEARCH', 'COLONIZE', 'CONTACT', 'MOVE',
           'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL',
-          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE'],
-  VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE', REMEDIATION: 'REMEDIATE' },
+          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE', 'NAME'],
+  VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE', REMEDIATION: 'REMEDIATE', RENAME: 'NAME' },
 
   // Rules: Development to level N costs 3 x N Industry.
   DEVELOPMENT_COST_PER_LEVEL: 3,
@@ -770,7 +770,7 @@ function tpEvaluateOrder_(world, sim, o, earlier, phase) {
  *  The remark is dropped when what is left still names a system (an ID, or @ <place>), so a material or
  *  environment in parentheses ("Extractor (Void matter) @ C-07") is untouched. Diplomacy and prose verbs keep it. */
 function tpStripRemark_(verb, args) {
-  if (/^(?:TREATY|POLICY|INITIATIVE|STABILITY|COVERT|NOTE|CONTACT|LEASE)$/.test(verb)) return args;
+  if (/^(?:TREATY|POLICY|INITIATIVE|STABILITY|COVERT|NOTE|CONTACT|LEASE|NAME)$/.test(verb)) return args;
   var out = args, prev;
   do {
     prev = out;
@@ -833,6 +833,7 @@ function tpEvaluateBody_(world, sim, verb, body, o, phase) {
     case 'CONTACT': return tpEvContact_(world, sim, args, phase);
     case 'TREATY': return tpEvTreaty_(world, sim, args);
     case 'LEASE': return tpEvLease_(world, sim, args);
+    case 'NAME': return tpEvName_(world, sim, args);
     case 'DISMANTLE': return tpEvDismantle_(world, sim, args);
     case 'REMEDIATE': return tpEvRemediate_(world, sim, args);
     case 'POLICY': case 'INITIATIVE': return tpEvPolicy_(world, sim, verb, args);
@@ -1625,6 +1626,45 @@ function tpEvTreaty_(world, sim, args) {
 // Rules (Partnerships, Leases). An offer is delivered like a treaty proposal and answered next turn. An
 // acceptance makes a treaty: it goes to the GM with the Systems and Treaties cells to fill. LEASE END gives
 // 5 turns' notice on an indefinite lease; on approval the script writes the end turn and tells both parties.
+// ---------- NAME <system> AS <name>  |  NAME <world> @ <system> AS <name> ----------
+// Free. A nation names the systems it holds and the worlds within them (designer, Turn 36).
+function tpEvName_(world, sim, args) {
+  var m = String(args).match(/^(.*?)\s+(?:as|to)\s+["“']?(.+?)["”']?\s*\.?$/i) || String(args).match(/^(.*?)\s*[:=]\s*["“']?(.+?)["”']?\s*\.?$/);
+  if (!m) return tpRuling_('Naming order not understood: write NAME <system> AS <name>, or NAME <world> @ <system> AS <name>', 'No new name found', 'Identify what is named and the name.');
+  var what = m[1].trim(), name = m[2].trim();
+  if (name.length < 2 || name.length > 40 || /[<>{}\[\]@#|\\\/=;,]/.test(name)) return tpReject_('A name must be 2 to 40 characters of letters, spaces, apostrophes or hyphens');
+  var taken = function (nm) {
+    var k = tpNorm_(nm);
+    return world.systems.some(function (s) { return tpNorm_(s.get('Name')) === k || tpNorm_(s.id) === k; }) ||
+      world.worldsTab.rows().some(function (r) { return tpNorm_(world.worldsTab.get(r, 'World')) === k; });
+  };
+  var at = what.match(/^(.*?)\s*@\s*(.+)$/), sys = null, Wt = world.worldsTab, row = null;
+  if (at) {
+    sys = world.findSystem(at[2]);
+    if (!sys) return tpRuling_('System not found: "' + at[2] + '"', 'The script cannot find this system', 'Identify the system.');
+    var wq = tpNorm_(at[1]), rows = world.worldRows(sys.id);
+    row = rows.filter(function (r) { return tpNorm_(Wt.get(r, 'World')) === wq; })[0] ||
+      rows.filter(function (r) { var o = String(Wt.get(r, 'Orbit')), rn = String(Wt.get(r, 'World')).split(/\s+/).pop(); return tpNorm_(rn) === wq || o === at[1].trim() || tpNorm_('orbit ' + o) === wq; })[0];
+    if (!row) return tpReject_('No world "' + at[1] + '" in ' + tpSysLabel_(sys) + ' (name it by its present name, its numeral or its orbit)');
+  } else {
+    // a system by its ID or name; otherwise a world by its name (the name index also maps world names to their systems)
+    var wk = tpNorm_(what);
+    sys = world.systems.filter(function (x) { return tpNorm_(x.id) === wk || tpNorm_(x.get('Name')) === wk; })[0] || null;
+    if (!sys) {
+      var hit = Wt.rows().filter(function (r) { return tpNorm_(Wt.get(r, 'World')) === tpNorm_(what); });
+      if (hit.length === 1) { row = hit[0]; sys = world.sys(Wt.get(row, 'System ID')); }
+      else return tpRuling_('Not found: "' + what + '"', 'Neither a system nor a single world of that name', 'Identify the system or world.');
+    }
+  }
+  if (!sim.ownsActive(sys.id)) return tpReject_('Only a system the nation holds, and its worlds, may be named: ' + tpSysLabel_(sys));
+  if (taken(name)) return tpReject_('"' + name + '" is already the name of a system or world');
+  if (row) {
+    var old = String(Wt.get(row, 'World'));
+    return tpReady_('World ' + old + ' in ' + tpSysLabel_(sys) + ' named ' + name, 'Free', {}, {}, { type: 'NAME', kind: 'world', sys: sys.id, row: row, old: old, name: name });
+  }
+  return tpReady_(tpSysLabel_(sys) + ' named ' + name, 'Free', {}, {}, { type: 'NAME', kind: 'system', sys: sys.id, name: name });
+}
+
 function tpEvLease_(world, sim, args) {
   var text = String(args || '').replace(/^\s*[:\-–—]\s*/, '').trim();
   var m = text.match(/^(?:end|ends|ending|terminate|cancel|notice)\b\s*(?:to\s+end\b\s*)?(?:on\s+|of\s+)?(?:the\s+)?(?:lease\s+(?:of|on)\s+)?:?\s*(.+)$/i);
@@ -2523,6 +2563,15 @@ tpResolver_.prototype.apply = function (a, sp, ev) {
       this.log('Spending', n, 'Reform', 'Government now ' + sp.gov + '; check the Fiscal tab for lines out of bounds', 'Yes', a.actionNo);
       break;
     case 'STABILITY': case 'CHARGE_ONLY': case 'STAB_ONLY': break;
+    case 'NAME':
+      if (sp.kind === 'system') {
+        w.sys(sp.sys).set('Name', sp.name);
+        // worlds still carrying the system's ID as their name ("C-04 IV") take the new name ("Elvaris IV")
+        w.worldRows(sp.sys).forEach(function (r) { var wn = String(w.worldsTab.get(r, 'World')); if (wn.indexOf(sp.sys + ' ') === 0) w.worldsTab.set(r, 'World', sp.name + wn.slice(sp.sys.length)); });
+      }
+      else w.worldsTab.set(sp.row, 'World', sp.name);
+      this.log('Spending', n, 'Named', (sp.kind === 'system' ? 'System ' + sp.sys : 'World ' + sp.old + ' in ' + sp.sys) + ' named ' + sp.name, 'No', a.actionNo);
+      break;
     case 'DISMANTLE': {
       var S = w.sys(sp.sys), list = String(S.get('Buildings') || '').split(/\s*,\s*/).filter(function (x) { return x; });
       var i = list.indexOf(sp.building);
