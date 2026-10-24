@@ -290,12 +290,16 @@ function pfRecord_(W, n) {
   // worlds (same layout the star map's private link reads)
   var worlds = [['System ID', 'System', 'World', 'Orbit', 'Kind', 'Environment', 'Habitable', 'Settled', 'Population (bn)', 'Buildings here',
     'Industry', 'Energy', 'Research', 'Influence', 'Description']];
-  W.worlds.filter(function (w) { return w.get('Owner') === id && w.get('World'); })
+  // the nation's own worlds in full; the worlds of other systems it has charted, without people, works or output
+  var chartedBy = {}; W.systems.forEach(function (s) { if (String(s.get('Discovered by') || '').split(/\s*,\s*/).indexOf(id) >= 0) chartedBy[s.get('System ID')] = true; });
+  W.worlds.filter(function (w) { return w.get('World') && (w.get('Owner') === id || chartedBy[w.get('System ID')]); })
     .sort(function (a, b) { return a.get('System ID') < b.get('System ID') ? -1 : a.get('System ID') > b.get('System ID') ? 1 : a.num('Orbit') - b.num('Orbit'); })
     .forEach(function (w) {
+      var mine = w.get('Owner') === id;
       worlds.push([w.get('System ID'), W.sysName[w.get('System ID')] || '', w.get('World'), w.get('Orbit'), w.get('Kind'), w.get('Environment'),
-        w.get('Habitable'), w.get('Settled'), w.get('Population (bn)'), w.get('Buildings here'),
-        w.get('Industry'), w.get('Energy'), w.get('Research'), w.get('Influence'), w.get('Description')]);
+        w.get('Habitable'), mine ? w.get('Settled') : '', mine ? w.get('Population (bn)') : '', mine ? w.get('Buildings here') : '',
+        mine ? w.get('Industry') : '', mine ? w.get('Energy') : '', mine ? w.get('Research') : '', mine ? w.get('Influence') : '',
+        mine ? w.get('Description') : (w.get('Habitable') === 'Yes' ? 'Habitable' : '')]);
     });
 
   // forces
@@ -468,7 +472,7 @@ function pfExtras_(W, n, rec, ss) {
   // lanes from the nearest held system, for colonization reach
   var ownDist = {}, q2 = Object.keys(cs.own); q2.forEach(function (k) { ownDist[k] = 0; });
   while (q2.length) { var x2 = q2.shift(); if (ownDist[x2] >= 2) continue; (adj[x2] || []).forEach(function (y) { if (ownDist[y] == null) { ownDist[y] = ownDist[x2] + 1; q2.push(y); } }); }
-  var reach = [['System ID', 'Name', 'Nearest', 'Jumps', 'This turn', 'Charted', 'Owner', 'Class', 'Environment', 'Deposits', 'Feature', 'Colonize']];
+  var reach = [['System ID', 'Name', 'Nearest', 'Jumps', 'This turn', 'Charted', 'Owner', 'Class', 'Environment', 'Deposits', 'Feature', 'Colonize', 'Habitable planets']];
   Object.keys(best).sort(function (a, b) { return best[a].d - best[b].d || (a < b ? -1 : 1); }).forEach(function (k) {
     var s = sysBy[k]; if (!s) return;
     var ch = !!cs.charted[k], owner = s.get('Owner');
@@ -476,7 +480,7 @@ function pfExtras_(W, n, rec, ss) {
     var col = (!ch || !owner) ? (ownDist[k] != null && ownDist[k] <= reachCol ? 'Direct' : 'Expedition') + (ch ? '' : ' (uncharted)') : '';
     reach.push([k, ch ? s.get('Name') : '', best[k].from, best[k].d, best[k].d <= range ? 'Yes' : 'With isotopes',
       ch ? 'Yes' : 'No', ch && owner ? (natName[owner] || owner) : '', ch ? s.get('Class') : '', ch ? s.get('Environment') : '',
-      ch ? s.get('Deposits') : '', ch ? s.get('Feature') : '', col]);
+      ch ? s.get('Deposits') : '', ch ? s.get('Feature') : '', col, ch ? s.get('Habitable planets') : '']);
   });
   rec.Reach = reach;
 

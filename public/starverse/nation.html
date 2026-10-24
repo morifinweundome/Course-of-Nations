@@ -632,7 +632,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         if (others.some(function (x) { return x.verb === 'COLONIZE' && x.sys === r.sys; })) bad('Already in your basket.');
         else if (num(kv('Stability')) <= 3) bad('A nation in Unrest or worse may not colonize this turn.');
         else if (t['Charted'] === 'No') { out.msg = 'Uncharted: its world, life and deposits are unknown until the colony lands; if another power already holds it, the order fails. ' + (/^Expedition/.test(kind) ? 'Beyond direct reach: an expedition at the colony\'s cost, travelling at your jump range.' : kind.replace(' (uncharted)', '') + '.') + ' 0.3 bn settlers leave your worlds.'; out.cls = 'wait'; }
-        else { out.msg = (t['Class'] || '') + ' ' + (t['Environment'] || '') + (t['Deposits'] ? ' · ' + t['Deposits'] : '') + ' · ' + (kind || '') + ' · 0.3 bn settlers leave your worlds'; out.cls = 'ok'; }
+        else { out.msg = (t['Class'] || '') + ' system' + (num(t['Habitable planets']) || t['Habitable planets'] === '0' ? ' (' + t['Habitable planets'] + ' habitable planet' + (t['Habitable planets'] === '1' ? '' : 's') + ')' : '') + (t['Environment'] ? ', ' + t['Environment'] + ' main world' : '') + (t['Deposits'] ? ' · ' + t['Deposits'] : '') + ' · ' + (kind || '') + ' · 0.3 bn settlers leave your worlds'; out.cls = 'ok'; }
         break;
       }
       case 'SHIP': case 'GROUND': {
@@ -737,7 +737,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
         break;
       case 'COLONIZE':
         f = '<select data-f="sys">' + bkOpt(BK.reach.filter(function (x) { return !x['Owner'] && x['Colonize'] && !/^no/i.test(x['Colonize']); })
-          .map(function (x) { return [x['System ID'], x['System ID'] + ' · ' + (x['Charted'] === 'No' ? 'uncharted, contents unknown' : (x['Class'] || '') + ' ' + (x['Environment'] || '')) + ' · ' + x['Colonize'].replace(' (uncharted)', '') + ' · ' + x['Jumps'] + (x['Jumps'] === '1' ? ' jump' : ' jumps')]; }), r.sys, 'Target…') + '</select>';
+          .map(function (x) { return [x['System ID'], x['System ID'] + ' · ' + (x['Charted'] === 'No' ? 'uncharted, contents unknown' : (x['Class'] || '') + ' system' + (num(x['Habitable planets']) || x['Habitable planets'] === '0' ? ' (' + x['Habitable planets'] + ' habitable planet' + (x['Habitable planets'] === '1' ? '' : 's') + ')' : '') + (x['Environment'] ? ', ' + x['Environment'] + ' main world' : '')) + ' · ' + x['Colonize'].replace(' (uncharted)', '') + ' · ' + x['Jumps'] + (x['Jumps'] === '1' ? ' jump' : ' jumps')]; }), r.sys, 'Target…') + '</select>';
         break;
       case 'SHIP': case 'GROUND':
         var grp = r.verb === 'SHIP' ? 'Ships' : 'Ground formations';
@@ -1394,7 +1394,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       { k: 'Jumps', n: 1, f: function (v, r) { return esc(v) + (r['This turn'] === 'Yes' ? '' : ' <span class="aff next">isotopes</span>'); } },
       { k: 'Nearest', t: 'From' },
       { k: 'Owner', f: function (v, r) { return r['Charted'] === 'Yes' ? (v ? esc(v) : '<span class="muted">Unclaimed</span>') : '<span class="muted">Uncharted</span>'; } },
-      { k: 'Class' }, { k: 'Environment' }, { k: 'Deposits', f: function (v) { return v ? chips(v) : ''; } }, { k: 'Feature' },
+      { k: 'Class', t: 'System class', f: function (v, r) { return v ? esc(v) + (r['Habitable planets'] !== undefined && r['Habitable planets'] !== '' ? ' <span class="muted">· ' + esc(r['Habitable planets']) + ' habitable</span>' : '') : ''; } },
+      { k: 'Environment', t: 'Main world' }, { k: 'Deposits', f: function (v) { return v ? chips(v) : ''; } }, { k: 'Feature' },
       { k: 'Colonize', f: function (v) { return v === 'Direct' ? '<span class="aff now">Colony</span>' : v ? '<span class="aff next">Expedition</span>' : ''; } }
     ], { empty: 'Nothing within reach.' });
   }

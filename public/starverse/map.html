@@ -608,7 +608,9 @@ function card(s) {
     const row = (k, v) => v ? `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>` : '';
   let body;
   if (s.charted) {
-    body = `<dl>${row('Class', s.class)}${row('Main world', s.type && s.type[0].toUpperCase() + s.type.slice(1))}${row('Environment', s.env)}${row('Life', s.life)}${row('Native era', s.era)}${s.deposits ? `<dt>Deposits</dt><dd>${window.SISym ? SISym.deco(esc(s.deposits)) : esc(s.deposits)}</dd>` : ''}${row('Feature', s.feature)}</dl>`;
+    const hab = s.hab !== undefined && s.hab !== '' ? ` · ${s.hab} habitable planet${s.hab === '1' ? '' : 's'}` : '';
+    const cap = ({ Barren: 3, Minor: 4, Standard: 6, Rich: 7, Exceptional: 8, Homeworld: 7 })[s.class];
+    body = `<dl>${row('System class', s.class ? s.class + hab : '')}${row('Development cap', cap ? 'Up to ' + cap + ' (one building slot per level)' : '')}${row('System type', s.type && s.type[0].toUpperCase() + s.type.slice(1))}${row('Main world', s.env ? s.env + ' environment' : '')}${row('Life', s.life)}${row('Native era', s.era)}${s.deposits ? `<dt>Deposits</dt><dd>${window.SISym ? SISym.deco(esc(s.deposits)) : esc(s.deposits)}</dd>` : ''}${row('Feature', s.feature)}</dl>`;
   } else {
     body = `<p class="fog">Uncharted. Its contents are revealed when a nation holds a system within one lane of it.</p>`;
   }
@@ -768,7 +770,7 @@ async function playerFeed() {
     const sys = objects(parseCSV(a)).map(o => ({
       id: o['System ID'], sector: o['Sector'], gateway: yes(o['Gateway']), corelink: yes(o['Core link']),
       x: parseFloat(o['x']), y: parseFloat(o['y']), owner: o['Owner'], ownerId: o['Owner ID'], name: o['Name'], charted: o['Charted'] === 'Yes',
-      class: o['Class'], type: o['Type'], life: o['Life'], era: o['Native era'], deposits: o['Deposits'], feature: o['Feature'], env: o['Environment'],
+      class: o['Class'], hab: o['Habitable planets'], type: o['Type'], life: o['Life'], era: o['Native era'], deposits: o['Deposits'], feature: o['Feature'], env: o['Environment'],
       colour: o['Owner'] ? nationColour(o['Colour'], o['Owner']) : null,
       lessor: o['Lessor'] || '', lessorColour: o['Lessor'] ? nationColour(o['Lessor colour'], o['Lessor']) : null
     }));
