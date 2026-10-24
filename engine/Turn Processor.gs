@@ -3286,6 +3286,17 @@ function tpWorld_(model) {
   this.forcesTab = model.tab('Forces');
   this.ledgerTab = model.tab('Ledger');
   this.reloadCalc();
+  // Advanced materials (Recipes tab) may be named as building costs, e.g. an Unlocks row's Strategic column.
+  TP_ADV_ = {}; this.advByNation = {};
+  try {
+    var RT = model.tab('Recipes');
+    RT.rows().forEach(function (r) {
+      var nm = String(RT.get(r, 'Recipe') || '').trim(), nid = String(RT.get(r, 'Nation') || '').trim();
+      if (!nm) return;
+      TP_ADV_[tpNorm_(nm)] = nm;
+      (self.advByNation[nid] = self.advByNation[nid] || []).push(nm);
+    });
+  } catch (e) { /* no Recipes tab */ }
   // Nations
   this.nations = [];
   var N = this.nationsTab;
@@ -3893,12 +3904,14 @@ tpWorld_.prototype.disbandDreadnoughts = function (nid, count) {
 tpWorld_.prototype.newSim = function (n, phase, resolver) {
   var self = this, c = this.calc(n.id) || {};
   var stock;
-  if (phase === 'prepare') { stock = this.projectedStock(n.id); stock[TURN_CONFIG.MARKS] = tpRound2_(this.stock(n.id, TURN_CONFIG.MARKS) + (stock[TURN_CONFIG.MARKS] || 0)); }
+  var adv = (this.advByNation && this.advByNation[n.id]) || [];   // the nation's advanced materials, priced from the Ledger
+  if (phase === 'prepare') { stock = this.projectedStock(n.id); stock[TURN_CONFIG.MARKS] = tpRound2_(this.stock(n.id, TURN_CONFIG.MARKS) + (stock[TURN_CONFIG.MARKS] || 0));
+    adv.forEach(function (r) { if (stock[r] === undefined) stock[r] = self.stock(n.id, r); }); }
   else {
     stock = {};
     var w = this;
     // In resolution the stock is read live from the Ledger as it stands.
-    TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC, [TURN_CONFIG.MARKS]).forEach(function (r) {
+    TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC, [TURN_CONFIG.MARKS], adv).forEach(function (r) {
       Object.defineProperty(stock, r, { enumerable: true, configurable: true,
         get: function () { return w.stock(n.id, r) - (sim.pendingSpend[r] || 0); },
         set: function (v) { /* spending is written to the Ledger by the resolver */ } });
@@ -4228,6 +4241,7 @@ function tpParseQty_(text) {
   else { var m2 = t.match(/^(\d+)\s*[x×]?\s+(.*)$/i); if (m2) { n = Number(m2[1]); t = m2[2]; } }
   return { n: n, name: t.trim() };
 }
+var TP_ADV_ = {};   // advanced material names, filled from the Recipes tab when the world loads
 function tpParseStrat_(text) {
   var out = {};
   String(text || '').split(/\s*[;,]\s*/).forEach(function (p) {
@@ -4235,7 +4249,7 @@ function tpParseStrat_(text) {
     if (!m) return;
     var amt = /^\d/.test(m[1]) ? Number(m[1]) : Number(m[2]);
     var name = /^\d/.test(m[1]) ? m[2] : m[1];
-    var r = TURN_CONFIG.STRATEGIC.filter(function (s) { return tpNorm_(s) === tpNorm_(name); })[0];
+    var r = TURN_CONFIG.STRATEGIC.filter(function (s) { return tpNorm_(s) === tpNorm_(name); })[0] || TP_ADV_[tpNorm_(name)];
     if (r) out[r] = (out[r] || 0) + amt;
   });
   return out;
