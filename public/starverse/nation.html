@@ -501,8 +501,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     { Item: 'Habitat Station', Industry: '12', Strategic: '', Requires: 'Society Tier 2; orbital, takes an orbital slot', orbital: true },
     { Item: 'Arcology', Industry: '20', Strategic: '1 Lattice crystals', Requires: 'Industry Tier 4; Development 3; takes 2 turns' },
     { Item: 'Planetary Shield', Industry: '20', Strategic: '2 Lattice crystals', Requires: 'Military Tier 4; takes 2 turns' },
-    { Item: 'Orbital Fortress', Industry: '25', Strategic: '2 Adamant ore', Requires: 'Military Tier 3; takes 2 turns' },
-    { Item: 'Gravity Well Generator', Industry: '20', Strategic: '2 Antimatter; 1 Lattice crystals', Requires: 'Logistics Tier 4; takes 2 turns' }
+    { Item: 'Orbital Fortress', Industry: '25', Strategic: '2 Adamant ore', Requires: 'Military Tier 3; orbital, takes an orbital slot; takes 2 turns', orbital: true },
+    { Item: 'Gravity Well Generator', Industry: '20', Strategic: '2 Antimatter; 1 Lattice crystals', Requires: 'Logistics Tier 4; orbital, takes an orbital slot; takes 2 turns', orbital: true }
   ];
   var BK_VERBS = [
     ['BUILD', 'Build'], ['DEVELOP', 'Develop'], ['DESIGNATE', 'Designate'], ['RESEARCH', 'Research'], ['COLONIZE', 'Colonize'],
@@ -1075,8 +1075,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
       { k: 'Designation' }, { k: 'Development', n: 1, f: function (v, r) { return esc(v) + (r['Development cap'] ? ' <span class="muted">/ ' + esc(r['Development cap']) + '</span>' : ''); } },
       { k: 'Buildings', f: function (v) {
           var list = String(v || '').split(/\s*,\s*/).filter(Boolean);
-          var orb = list.filter(function (b) { return /Habitat Station/i.test(b); });
-          var main = list.filter(function (b) { return !/Habitat Station/i.test(b); });
+          var ORB_RE = /Habitat Station|Orbital Fortress|Gravity Well Generator/i;
+          var orb = list.filter(function (b) { return ORB_RE.test(b); });
+          var main = list.filter(function (b) { return !ORB_RE.test(b); });
           return (main.length ? esc(main.join(', ')) : '<span class="muted">—</span>') +
             (orb.length ? '<br><span class="muted">Orbital: ' + esc(orb.join(', ')) + '</span>' : '');
         } },

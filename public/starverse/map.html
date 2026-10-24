@@ -549,7 +549,7 @@ function worldsSection(s) {
 }
 /* ---------- a nation's own works and slots (private link only) ---------- */
 let WORKS = new Map();
-const ORBITAL = ['Habitat Station'];
+const ORBITAL = ['Habitat Station', 'Orbital Fortress', 'Gravity Well Generator'];
 function worksSection(s) {
   const o = WORKS.get(s.id); if (!o) return '';
   const all = String(o.buildings || '').split(/\s*,\s*/).filter(Boolean);

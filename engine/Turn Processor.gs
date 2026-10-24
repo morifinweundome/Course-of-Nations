@@ -234,8 +234,8 @@ var TURN_CONFIG = {
     'Habitat Station':        { industry: 12, strat: {}, req: { society: 2 }, turns: 1, slot: false, orbital: true },  // orbital: takes no planetary slot (ruling, Turn 26)
     'Arcology':               { industry: 20, strat: { 'Lattice crystals': 1 }, req: { industry: 4, development: 3 }, turns: 2, slot: true },
     'Planetary Shield':       { industry: 20, strat: { 'Lattice crystals': 2 }, req: { military: 4 }, turns: 2, slot: true, installation: true },
-    'Orbital Fortress':       { industry: 25, strat: { 'Adamant ore': 2 }, req: { military: 3 }, turns: 2, slot: true, installation: true },
-    'Gravity Well Generator': { industry: 20, strat: { 'Antimatter': 2, 'Lattice crystals': 1 }, req: { logistics: 4 }, turns: 2, slot: true, installation: true }
+    'Orbital Fortress':       { industry: 25, strat: { 'Adamant ore': 2 }, req: { military: 3 }, turns: 2, slot: false, orbital: true, installation: true },  // orbital slot (designer, Turn 35)
+    'Gravity Well Generator': { industry: 20, strat: { 'Antimatter': 2, 'Lattice crystals': 1 }, req: { logistics: 4 }, turns: 2, slot: false, orbital: true, installation: true }  // orbital slot (designer, Turn 35)
   },
   TWO_TURN_BUILDINGS: ['Military College', 'Arcology', 'Planetary Shield', 'Orbital Fortress', 'Gravity Well Generator'],
   // Signature works (rules, Partnerships): need the habitat's expertise.

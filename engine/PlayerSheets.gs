@@ -241,7 +241,7 @@ function pfRecord_(W, n) {
   var sys = [['System ID', 'Name', 'Sector', 'Class', 'Environment', 'Designation', 'Development', 'Development cap', 'Buildings',
     'Slots', 'Slots used', 'Condition', 'Strain', 'Population (bn)', 'Carrying capacity (bn)', 'Industry', 'Energy', 'Research', 'Influence', 'Growth due (bn)', 'Overcrowded', 'Orbital slots', 'Orbital used',
     'Leased from', 'Lease']];
-  var orbital = ['Habitat Station'];
+  var orbital = ['Habitat Station', 'Orbital Fortress', 'Gravity Well Generator'];
   W.unlocks.forEach(function (u) { if (/orbital/i.test(u.get('Takes a slot')) && orbital.indexOf(u.get('Building')) < 0) orbital.push(u.get('Building')); });
   W.systems.filter(function (s) { return s.get('Owner') === id; }).forEach(function (s) {
     sys.push([s.get('System ID'), s.get('Name'), s.get('Sector'), s.get('Class'), s.get('Environment'), s.get('Designation'),
