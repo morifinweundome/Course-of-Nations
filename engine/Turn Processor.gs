@@ -88,6 +88,17 @@
  *      Nations "Species Admin Capacity". The stipend's +1 is written to Nations
  *      "Temporary Stability target". Both lapse (row made inactive, column lowered) in any
  *      turn their upkeep cannot be paid. A missing column is skipped with a Turn log line.
+ *  17. Leases. Systems "Owner" is the lessee, so output, Administrative Capacity, Stability,
+ *      defence and builds already fall on it; "Lessor (sovereign)" names the sovereign. Each turn, after
+ *      Upkeep, the resolver pays the lease: Rent (lessee to lessor; unpaid rent ends the lease), Extraction
+ *      (the system's strategic output, from the Systems strategic columns, passed lessee to lessor), both, or
+ *      Shared (half of the system's Industry, Energy, Research and Influence columns and half its strategic
+ *      output, lessee to lessor). Payments are transfer lines (phase Diplomacy), as treaty fees are. A lease
+ *      ends at the end of its "Lease ends (turn)"; war between the parties ends it at the start of the
+ *      resolution (sovereignty to the lessor, Status "Occupied by <lessee> (T<turn>)"); an eliminated lessor
+ *      leaves the world to the lessee outright, an eliminated lessee returns it; a world taken by a third
+ *      power voids it. LEASE offers are delivered like treaty proposals; acceptances are rulings that list
+ *      the cells to fill; LEASE END gives 5 turns' notice on an indefinite lease (written on approval).
  *
  * NOTHING HERE WRITES TO A FORMULA CELL. Each tab's writable columns are listed in
  * TURN_CONFIG.WRITABLE, by header text, following the README.
@@ -140,7 +151,9 @@ var TURN_CONFIG = {
     'Ledger': ['Turn', 'Phase', 'Nation', 'Resource', 'Amount', 'Reason', 'Working', 'Action row', 'Shown to player'],
     'Actions': ['Turn', 'Nation', 'Channel', 'Posted text', 'Verb', 'Details', 'Industry', 'Energy', 'Research', 'Influence',
                 'Strategic', 'Status', 'Flag', 'GM ruling', 'Elaboration summary', 'Ledger lines'],
-    'Systems': ['Owner', 'Name', 'Development', 'Designation', 'Buildings', 'Discovered by'],
+    'Systems': ['Owner', 'Name', 'Development', 'Designation', 'Buildings', 'Discovered by', 'Status',
+                'Lessor (sovereign)', 'Lease treaty', 'Lease payment', 'Lease rent per turn', 'Lease ends (turn)'],
+    'Treaties': ['Ended (turn)', 'Status'],
     'Worlds': ['System ID', 'World', 'Orbit', 'Kind', 'Environment', 'Habitable', 'Settled', 'Population (bn)', 'Buildings here', 'Description'],
     'Forces': ['Force ID', 'Owner', 'Name', 'Location', 'Escorts', 'Cruisers', 'Battleships', 'Dreadnoughts', 'Transports',
                'Ground Power', 'Static Defence', 'Note'],
@@ -165,7 +178,7 @@ var TURN_CONFIG = {
 
   VERBS: ['DEVELOP', 'DESIGNATE', 'BUILD', 'SHIP', 'GROUND', 'DEFENCE', 'RESEARCH', 'COLONIZE', 'CONTACT', 'MOVE',
           'SHIFT', 'CIVIC', 'REFORM', 'TRANSFER', 'STABILITY', 'FATE', 'BURN', 'BREAK', 'BUY', 'SELL', 'CANCEL',
-          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE'],
+          'TREATY', 'POLICY', 'INITIATIVE', 'DISMANTLE', 'REMEDIATE', 'LEASE'],
   VERB_ALIASES: { DEFENSE: 'DEFENCE', COLONISE: 'COLONIZE', REMEDIATION: 'REMEDIATE' },
 
   // Rules: Development to level N costs 3 x N Industry.
@@ -187,6 +200,10 @@ var TURN_CONFIG = {
   // Nations columns written by the stipend and by charters (skipped with a Turn log line if missing).
   TEMP_TARGET_COLUMN: 'Temporary Stability target',
   ADMIN_CAPACITY_COLUMN: 'Species Admin Capacity',
+  // Leases (rules, Partnerships). Systems "Owner" is the nation that administers the system (the lessee);
+  // these columns hold the sovereign and the terms. Any of them may be missing: a missing column reads blank.
+  LEASE: { lessor: 'Lessor (sovereign)', treaty: 'Lease treaty', payment: 'Lease payment', rent: 'Lease rent per turn',
+    ends: 'Lease ends (turn)', notice: 5, forms: ['Rent', 'Extraction', 'Rent and extraction', 'Shared'] },
   SHIFT_COST: { Influence: 15, Stability: 1 },
   CIVIC_REPLACE_COST: { Influence: 20, Stability: 1 },
   REFORM_COST: { Influence: 30, Stability: 2 },
@@ -742,7 +759,7 @@ function tpEvaluateOrder_(world, sim, o, earlier, phase) {
  *  The remark is dropped when what is left still names a system (an ID, or @ <place>), so a material or
  *  environment in parentheses ("Extractor (Void matter) @ C-07") is untouched. Diplomacy and prose verbs keep it. */
 function tpStripRemark_(verb, args) {
-  if (/^(?:TREATY|POLICY|INITIATIVE|STABILITY|COVERT|NOTE|CONTACT)$/.test(verb)) return args;
+  if (/^(?:TREATY|POLICY|INITIATIVE|STABILITY|COVERT|NOTE|CONTACT|LEASE)$/.test(verb)) return args;
   var out = args, prev;
   do {
     prev = out;
@@ -804,6 +821,7 @@ function tpEvaluateBody_(world, sim, verb, body, o, phase) {
     case 'CANCEL': return tpEvCancel_(world, sim, args);
     case 'CONTACT': return tpEvContact_(world, sim, args, phase);
     case 'TREATY': return tpEvTreaty_(world, sim, args);
+    case 'LEASE': return tpEvLease_(world, sim, args);
     case 'DISMANTLE': return tpEvDismantle_(world, sim, args);
     case 'REMEDIATE': return tpEvRemediate_(world, sim, args);
     case 'POLICY': case 'INITIATIVE': return tpEvPolicy_(world, sim, verb, args);
@@ -1529,6 +1547,7 @@ function tpEvTreaty_(world, sim, args) {
   var isTrade = /(?:^|[:;,.]|\s-\s|\b(?:propose|proposes|proposing|accept|accepts|accepting|offer|offers|sign|signs)\b)\s*(?:a\s+|the\s+|our\s+|your\s+)?trade\s+agreements?\b/i.test(text) &&
     !/\bnot\s+a\s+trade\s+agreement\b/i.test(text) && !/\b(?:end|ends|ending|cancel|terminate|withdraw)\b[^.;]*\btrade\s+agreement/i.test(text);
   if (!decline && (/^\s*(?:we\s+)?(?:accept|agree|ratif|sign|confirm)/i.test(text) || /\baccept(?:s|ed|ing)?\b|\bratif(?:y|ies|ied)\b/i.test(text))) {
+    if (/\bleas(?:e|es|ed|ing)\b/i.test(text)) return tpLeaseAccept_(world, sim, body, to);
     if (isTrade) {
       // Trade slots (rules: Trade): a trade agreement needs a free slot on both sides.
       var mineS = tpTradeSlots_(world, sim.nid, sim), theirs = tpTradeSlots_(world, to.id, null);
@@ -1562,6 +1581,231 @@ function tpEvTreaty_(world, sim, args) {
   }
   return tpReady_(details, (decline ? 'Reply delivered to ' : 'Proposal delivered to ') + to.name + '; answered next turn (in contact: ' + rec.how + ')',
     {}, {}, { type: 'TREATY', to: to.id, mode: mode, text: body });
+}
+
+// ---------- LEASE <system> TO <nation>: <terms> | LEASE <system> FROM <nation>: accept | LEASE END <system> ----------
+// Rules (Partnerships, Leases). An offer is delivered like a treaty proposal and answered next turn. An
+// acceptance makes a treaty: it goes to the GM with the Systems and Treaties cells to fill. LEASE END gives
+// 5 turns' notice on an indefinite lease; on approval the script writes the end turn and tells both parties.
+function tpEvLease_(world, sim, args) {
+  var text = String(args || '').replace(/^\s*[:\-–—]\s*/, '').trim();
+  var m = text.match(/^(?:end|ends|ending|terminate|cancel|notice)\b\s*(?:to\s+end\b\s*)?(?:on\s+|of\s+)?(?:the\s+)?(?:lease\s+(?:of|on)\s+)?:?\s*(.+)$/i);
+  if (m) return tpLeaseEnd_(world, sim, m[1]);
+  if (/\baccept(?:s|ed|ing)?\b/i.test(text)) return tpLeaseAccept_(world, sim, text, null);
+  // Offer: the system before " to ", the nation after it, then the terms.
+  var parts = text.split(/\s+to\s+/i), sys = null, rest = '';
+  for (var i = 1; i < parts.length && !sys; i++) {
+    var cand = tpLeaseSystem_(world, parts.slice(0, i).join(' to '));
+    if (cand) { sys = cand; rest = parts.slice(i).join(' to '); }
+  }
+  if (!sys) return tpRuling_('Lease not understood (write LEASE <system> TO <nation>: <terms>)', 'The script cannot find the system or the nation', 'Read the order and deliver it by hand.', { details: text });
+  var to = null, terms = '';
+  m = rest.match(/^(.+?)\s*(?::|\s[-–—]\s|,)\s*(.*)$/);
+  if (m) { to = world.nationByName(m[1]); terms = m[2]; }
+  if (!to) { to = world.nationByName(rest); terms = ''; }
+  if (!to) {
+    var named = world.nationMentions(rest).filter(function (id) { return id !== sim.nid; });
+    if (named.length) { to = world.nation(named[0]); terms = rest; }
+  }
+  if (!to) return tpRuling_('Lessee not found (write LEASE <system> TO <nation>: <terms>)', 'No other nation is named', 'Identify the nation and deliver it by hand.', { details: text });
+  if (to.id === sim.nid) return tpReject_('A nation cannot lease a system to itself');
+  if (to.status === 'Eliminated') return tpReject_(to.name + ' is eliminated');
+  var label = tpSysLabel_(sys), ls = tpLeaseOf_(world, sys), sov = ls ? ls.lessor : String(sys.get('Owner') || '').trim();
+  if (sov !== sim.nid) {
+    if (ls && ls.lessee === sim.nid) return tpReject_('We hold ' + label + ' on lease from ' + world.nameOf(ls.lessor) + '; only its sovereign may lease it');
+    return tpReject_('Not ours to lease: ' + label + (sov ? ' is held by ' + world.nameOf(sov) : ' is unclaimed'));
+  }
+  var st = String(sys.get('Status') || '').trim();
+  if (st) return tpReject_(label + ' cannot be leased while it stands "' + st + '"');
+  if (ls && ls.lessee !== to.id) return tpReject_(label + ' is already leased to ' + world.nameOf(ls.lessee) + (ls.ends ? ' until Turn ' + ls.ends : ' (indefinite)') + '; it can be offered again when that lease ends');
+  if (world.warBetween(sim.nid, to.id)) return tpReject_('At war with ' + to.name + ': war between lessor and lessee ends a lease at once');
+  var body = 'Lease of ' + label + ' to ' + to.name + (terms ? ': ' + terms : '');
+  if (sim.contacted[to.id]) return tpReject_('No contact with ' + to.name + ' yet: CONTACT is ordered this turn, and diplomacy may begin the turn after');
+  var rec = world.contactWith(sim.nid, to.id);
+  var spec = { type: 'TREATY', to: to.id, mode: 'proposal', text: body, lease: sys.id };
+  if (!rec) {
+    var nb = world.neighbouring(sim.nid, to.id);
+    if (nb) return tpRuling_('No contact with ' + to.name + ' on record', 'Neither nation has made first contact, though ' + nb,
+      'Approve to deliver the lease offer (and count the two as in contact); otherwise reject: No contact with ' + to.name + '.',
+      { details: 'Proposal to ' + to.name + ': ' + body, cost: {}, strat: {}, stab: 0, spec: spec });
+    return tpReject_('No contact with ' + to.name);
+  }
+  var t = tpLeaseTerms_(terms);
+  var read = [t.form || 'payment not named', t.rentText ? 'rent ' + t.rentText + ' a turn' : '', t.turns ? t.turns + ' turns' : (t.indefinite ? 'indefinite' : 'term not named')].filter(String).join('; ');
+  return tpReady_('Proposal to ' + to.name + ': ' + body,
+    'Lease offer delivered to ' + to.name + '; answered next turn (in contact: ' + rec.how + '). Terms read as: ' + read +
+    '. We keep sovereignty; ' + to.name + ' governs it, and it counts against ' + to.name + '\'s Administrative Capacity while leased',
+    {}, {}, spec);
+}
+
+/** A lease acceptance: from LEASE ... accept, or TREATY <nation>: accept the lease of <system>. A ruling. */
+function tpLeaseAccept_(world, sim, text, other) {
+  var sys = tpLeaseSystemIn_(world, text);
+  if (!sys) return tpRuling_('Lease acceptance: system not identified', 'The line accepts a lease but names no system the script can find',
+    'Identify the system and record the lease by hand (Systems: Owner, Lessor (sovereign), Lease treaty, Lease payment, Lease rent per turn, Lease ends (turn); Treaties: a Lease row).', { details: text });
+  var label = tpSysLabel_(sys), ls = tpLeaseOf_(world, sys), owner = String(sys.get('Owner') || '').trim(), sov = ls ? ls.lessor : owner;
+  if (!other) {
+    var named = world.nationMentions(text.replace(new RegExp(tpEscapeRe_(sys.id), 'g'), ' ')).filter(function (id) { return id !== sim.nid; });
+    if (named.length) other = world.nation(named[0]);
+  }
+  if (!sov) return tpReject_(label + ' is unclaimed: there is no sovereign to lease it');
+  var lessor, lessee;
+  if (sov === sim.nid) {
+    if (!other) return tpRuling_('Lease acceptance: lessee not named', 'We hold ' + label + '; the line does not say to whom it is leased', 'Identify the lessee, then record the lease.', { details: text });
+    lessor = sim.nid; lessee = other.id;
+  } else {
+    if (other && other.id !== sov) return tpReject_(label + ' is held by ' + world.nameOf(sov) + ', not ' + other.name + ': only its sovereign may lease it');
+    lessor = sov; lessee = sim.nid;
+  }
+  var lsr = world.nation(lessor), lse = world.nation(lessee);
+  if (!lsr || !lse) return tpRuling_('Lease acceptance: nation not found', 'A party is not on the Nations tab', 'Identify the parties.', { details: text });
+  if (lse.status === 'Eliminated' || lsr.status === 'Eliminated') return tpReject_((lse.status === 'Eliminated' ? lse.name : lsr.name) + ' is eliminated');
+  var st = String(sys.get('Status') || '').trim();
+  if (st) return tpReject_(label + ' cannot be leased while it stands "' + st + '"');
+  if (ls && ls.lessee !== lessee) return tpReject_(label + ' is already leased to ' + world.nameOf(ls.lessee) + (ls.ends ? ' until Turn ' + ls.ends : ' (indefinite)'));
+  if (!world.contactWith(lessor, lessee)) return tpReject_('No contact between ' + lsr.name + ' and ' + lse.name);
+  if (world.warBetween(lessor, lessee)) return tpReject_(lsr.name + ' and ' + lse.name + ' are at war: war between lessor and lessee ends a lease at once');
+  var turn = world.turnNo || 0, offer = tpLeaseOfferOnRecord_(world, sim.nid, sys, turn);
+  var t = tpLeaseTerms_(text);
+  if (offer) { var t2 = tpLeaseTerms_(offer.text); ['form', 'rentText', 'turns', 'indefinite'].forEach(function (k) { if (!t[k]) t[k] = t2[k]; }); }
+  var id = tpNextTreatyId_(world), from = turn + 1;
+  var ends = t.turns ? turn + t.turns : '';
+  var c = world.calc(lessee) || {}, held = tpNum_(c['Systems held']), cap = tpNum_(c['Administrative Capacity']);
+  var admin = c['Administrative Capacity'] === undefined || c['Administrative Capacity'] === '' ? lse.name + '\'s Administrative Capacity is not on Calculations: check it by hand' :
+    lse.name + ' holds ' + held + ' system' + (held === 1 ? '' : 's') + ' against Administrative Capacity ' + cap + '; with ' + sys.id + ', ' + (held + 1) + ' of ' + cap +
+    (held + 1 > cap ? ' (' + tpRound2_(held + 1 - cap) + ' over: the over-capacity penalties apply to ' + lse.name + ')' : ' (within capacity)') + '. The lessor sheds it from its own count';
+  var L = TURN_CONFIG.LEASE;
+  var cells = 'Systems row ' + sys.id + ': Owner = ' + lessee + '; ' + L.lessor + ' = ' + lessor + '; ' + L.treaty + ' = ' + id + '; ' + L.payment + ' = ' +
+    (t.form || 'one of ' + L.forms.join(', ') + ', as agreed') + '; ' + L.rent + ' = ' + (t.rentText || (/rent/i.test(t.form) ? '(the agreed rent, e.g. 20 Stellar Marks)' : 'blank')) + '; ' + L.ends + ' = ' +
+    (ends ? ends + ' (' + t.turns + ' turns from Turn ' + from + ')' : 'blank (indefinite' + (t.indefinite ? '' : ', unless a term was agreed') + ')') + '. ' +
+    'Treaties: new row ' + id + ': Type Lease; Parties "' + lessor + ', ' + lessee + '"; Signed ' + turn + '; In force from ' + from + '; Ended blank; Status Active; Terms "' +
+    tpLeaseTermsText_(sys, lsr, lse, t, ends) + '"; Diplomacy post link; Party 1 ' + lessor + '; Party 2 ' + lessee + '.';
+  return tpRuling_('Lease acceptance', 'Accepting a lease makes a treaty: the GM confirms the terms and records it',
+    'If the offer stands' + (offer ? ' (offer on record, Turn ' + offer.turn + ': "' + offer.text + '")' : ' (no lease offer found on the Events tab in the last 4 turns: check the diplomacy posts)') +
+    ': ' + cells + ' Payments begin Turn ' + from + ' and the script pays them each turn. ' + admin + '.',
+    { details: 'Acceptance: lease of ' + label + ' from ' + lsr.name + ' to ' + lse.name });
+}
+
+/** LEASE END <system>: 5 turns' notice on an indefinite lease, by either party. A ruling; approval writes the end turn. */
+function tpLeaseEnd_(world, sim, text) {
+  var sys = tpLeaseSystemIn_(world, text);
+  if (!sys) return tpRuling_('Lease notice: system not identified', 'Write LEASE END <system>', 'Identify the system.', { details: text });
+  var label = tpSysLabel_(sys), ls = tpLeaseOf_(world, sys);
+  if (!ls) return tpReject_(label + ' is not leased');
+  if (ls.lessor !== sim.nid && ls.lessee !== sim.nid) return tpReject_('Not a party to the lease of ' + label);
+  if (ls.ends) return tpReject_('The lease of ' + label + ' already ends at the end of Turn ' + ls.ends + ' (a fixed term, or notice already given); ending it sooner breaks the treaty (BREAK)');
+  var turn = world.turnNo || 0, ends = turn + TURN_CONFIG.LEASE.notice, L = TURN_CONFIG.LEASE;
+  return tpRuling_('Notice to end a lease', 'Either party may end an indefinite lease on ' + L.notice + ' turns\' notice, without breaking a treaty',
+    'Approve: the script writes ' + L.ends + ' = ' + ends + ' on Systems row ' + sys.id + ' (Turn ' + turn + ' + ' + L.notice + ') and tells both parties; ' + label +
+    ' returns to ' + world.nameOf(ls.lessor) + ' at the end of Turn ' + ends + (ls.treaty ? ' (' + ls.treaty + ')' : '') + '.',
+    { details: 'Notice: the lease of ' + label + ' ends at the end of Turn ' + ends, cost: {}, strat: {}, stab: 0,
+      spec: { type: 'LEASE_END', sys: sys.id, ends: ends, lessor: ls.lessor, lessee: ls.lessee, treaty: ls.treaty } });
+}
+
+/** The lease on a system, or null. Owner is the lessee; Lessor (sovereign) the sovereign (an ID or a name). */
+function tpLeaseOf_(world, s) {
+  var L = TURN_CONFIG.LEASE, raw = String(s.get(L.lessor) || '').trim();
+  if (!raw) return null;
+  var n = world.nationByName(raw), ends = s.get(L.ends);
+  return { sys: s.id, s: s, lessor: n ? n.id : raw, lessee: String(s.get('Owner') || '').trim(), treaty: String(s.get(L.treaty) || '').trim(),
+    payment: String(s.get(L.payment) || '').trim(), rent: String(s.get(L.rent) || '').trim(),
+    ends: ends === '' || ends === null || ends === undefined ? 0 : tpNum_(ends), status: String(s.get('Status') || '').trim() };
+}
+/** A system named by the whole text, or by an ID within it. */
+function tpLeaseSystem_(world, text) {
+  var t = String(text || '').replace(/\s*\([^)]*\)\s*/g, ' ').replace(/^\s*(?:the\s+)?(?:system\s+(?:of\s+)?)?/i, '').replace(/[.;,:]+\s*$/, '').trim();
+  return world.findSystem(t) || null;
+}
+function tpLeaseSystemIn_(world, text) {
+  var whole = tpLeaseSystem_(world, text);
+  if (whole) return whole;
+  var ids = String(text || '').match(/\b[A-Z]{1,4}-\d{1,3}\b/gi) || [];
+  for (var i = 0; i < ids.length; i++) { var s = world.sys(ids[i].toUpperCase()); if (s) return s; }
+  var m = String(text || '').match(/\blease\s+(?:of|on)\s+(.+?)(?:\s+(?:from|to|for|at|with|on)\b|[:;,.(]|$)/i);
+  return m ? tpLeaseSystem_(world, m[1]) : null;
+}
+/** Payment form, rent and term read from free text. */
+function tpLeaseTerms_(text) {
+  var t = String(text || ''), out = { form: '', rentText: '', turns: 0, indefinite: false };
+  var resNames = ['stellar marks?', 'marks?', 'sm', 'industry', 'energy', 'research', 'influence'].concat(TURN_CONFIG.STRATEGIC.map(function (r) { return tpEscapeRe_(r.toLowerCase()); }));
+  var resRe = '(' + resNames.join('|') + ')';
+  var m = t.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*' + resRe + '\\s*(?:a|per|each|every)\\s+turn', 'i')) ||
+          t.match(new RegExp('\\b(?:rent|fee)\\s*(?:of|:)?\\s*(\\d+(?:\\.\\d+)?)\\s*' + resRe + '\\b', 'i'));
+  if (m) { var res = tpLeaseResource_(m[2]); if (res) out.rentText = Number(m[1]) + ' ' + res; }
+  var tm = t.match(/\b(?:for|term\s+of|lasting|over)\s+(\d+)\s+turns?\b/i) || t.match(/\b(\d+)[\s-]turns?\s+(?:lease|term)\b/i);
+  if (tm) out.turns = Number(tm[1]);
+  out.indefinite = /\bindefinite(?:ly)?\b|\bopen[\s-]ended\b|\bno fixed term\b/i.test(t);
+  var extraction = /\bextract/i.test(t), shared = /\bshared?\b|\b50\s*\/\s*50\b|\bsplit\b/i.test(t), rent = !!out.rentText || /\brent\b/i.test(t);
+  out.form = shared ? 'Shared' : extraction && rent ? 'Rent and extraction' : extraction ? 'Extraction' : rent ? 'Rent' : '';
+  return out;
+}
+function tpLeaseResource_(name) {
+  var t = tpNorm_(name).replace(/[.]$/, '');
+  if (/^(?:stellar )?marks?$|^sm$/.test(t)) return TURN_CONFIG.MARKS;
+  return TURN_CONFIG.RESOURCES.concat(TURN_CONFIG.STRATEGIC).filter(function (r) { return tpNorm_(r) === t || tpNorm_(r) === t.replace(/s$/, '') || tpNorm_(r).replace(/s$/, '') === t; })[0] || '';
+}
+/** "20 Stellar Marks" or "15 Industry, 2 Antimatter" -> { resource: amount }, or null if unreadable. */
+function tpLeaseRent_(text) {
+  var out = {}, n = 0, bad = false;
+  String(text || '').replace(/\b(?:a|per|each|every)\s+turn\b/ig, '').split(/\s*(?:,|;|\+|\band\b)\s*/i).forEach(function (p) {
+    p = p.trim(); if (!p) return;
+    var m = p.match(/^(\d+(?:\.\d+)?)\s*(.+)$/), res = m ? tpLeaseResource_(m[2]) : '';
+    if (!res) { bad = true; return; }
+    out[res] = (out[res] || 0) + Number(m[1]); n++;
+  });
+  return n && !bad ? out : null;
+}
+/** What a lease passes from lessee to lessor in a turn, by its terms ({ resource: amount }; stockpiles not checked). */
+function tpLeaseDue_(world, ls) {
+  var form = tpLeaseForm_(ls), S = ls.s, out = {};
+  function add(r, v) { if (v > 0) out[r] = tpRound2_((out[r] || 0) + v); }
+  if (form === 'Rent' || form === 'Rent and extraction') { var rent = tpLeaseRent_(ls.rent) || {}; Object.keys(rent).forEach(function (r) { add(r, rent[r]); }); }
+  if (ls.status || !(form === 'Shared' || form === 'Extraction' || form === 'Rent and extraction')) return out;
+  var k = form === 'Shared' ? 0.5 : 1, strat = {};
+  TURN_CONFIG.STRATEGIC.forEach(function (r) { if (world.systemsTab.c(r) >= 0) strat[r] = tpNum_(S.get(r)); });
+  if (world.systemsTab.c('Strategic output') >= 0) { var p = tpParseStrat_(S.get('Strategic output')); Object.keys(p).forEach(function (r) { if (!strat[r]) strat[r] = p[r]; }); }
+  Object.keys(strat).forEach(function (r) { add(r, k * strat[r]); });
+  if (form === 'Shared') TURN_CONFIG.RESOURCES.forEach(function (r) { add(r, 0.5 * tpNum_(S.get(r))); });
+  return out;
+}
+/** The payment form as written on Systems, read leniently ("rent + extraction", "50/50"). */
+function tpLeaseForm_(ls) {
+  var p = tpNorm_(ls.payment);
+  if (!p) return ls.rent ? 'Rent' : '';
+  if (/shar|50\s*\/\s*50|split/.test(p)) return 'Shared';
+  if (/extract/.test(p)) return /rent|fee/.test(p) ? 'Rent and extraction' : 'Extraction';
+  if (/rent|fee/.test(p)) return 'Rent';
+  return '';
+}
+function tpLeaseTermsText_(sys, lsr, lse, t, ends) {
+  return lsr.name + ' leases ' + tpSysLabel_(sys) + ' to ' + lse.name + '; ' + (t.form || 'payment as agreed') + (t.rentText ? ', rent ' + t.rentText + ' a turn' : '') +
+    '; ' + (ends ? 'until the end of Turn ' + ends : 'indefinite (5 turns\' notice by either party)');
+}
+/** The latest lease offer delivered to a nation about a system (Events, Kind "Treaty proposed", last 4 turns). */
+function tpLeaseOfferOnRecord_(world, nid, sys, turn) {
+  var E = tpTryTab_(world.model, 'Events'), best = null;
+  if (!E) return null;
+  var nm = String(sys.get('Name') || '');
+  E.rows().forEach(function (r) {
+    if (tpNorm_(E.get(r, 'Kind')) !== 'treaty proposed') return;
+    if (String(E.get(r, 'Nations')).split(/\s*[,;]\s*/).indexOf(nid) < 0) return;
+    var tx = String(E.get(r, 'Text') || ''), et = tpNum_(E.get(r, 'Turn'));
+    if (!/\blease/i.test(tx) || (tx.indexOf(sys.id) < 0 && !(nm && tx.indexOf(nm) >= 0))) return;
+    if (turn && (et < turn - 4 || et >= turn)) return;
+    if (!best || et >= best.turn) best = { turn: et, text: tx.replace(/\s*Answer in your next orders[\s\S]*$/, '').trim() };
+  });
+  return best;
+}
+/** The next free treaty ID on the Treaties tab (T-001 style, as wide as the widest on record). Each call
+ *  in one run takes a new number, so two acceptances in a turn are not offered the same ID. */
+function tpNextTreatyId_(world) {
+  var T = tpTryTab_(world.model, 'Treaties'), max = 0, width = 3;
+  if (T) T.rows().forEach(function (r) { var m = String(T.get(r, 'Treaty ID') || '').match(/^T-(\d+)$/i); if (m) { max = Math.max(max, Number(m[1])); width = Math.max(width, m[1].length); } });
+  max = Math.max(max, world._treatyIdTaken || 0);
+  world._treatyIdTaken = max + 1;
+  var n = String(max + 1);
+  while (n.length < width) n = '0' + n;
+  return 'T-' + n;
 }
 
 // ---------- DISMANTLE <building> @ <system> ----------
@@ -1866,10 +2110,12 @@ tpResolver_.prototype.run = function (dry) {
   this.decisions = this.readDecisions();
   this.actions = this.readActions();
 
+  this.phaseLeaseBreaks(dry);
   this.phaseCaretaker(dry);
   this.phaseDiplomacy();
   this.phaseIncome();
   this.phaseUpkeep();
+  this.phaseLeases();
   this.phaseStandingEffects();
   this.phaseSynthesis();
   this.phaseExchange();
@@ -1880,6 +2126,7 @@ tpResolver_.prototype.run = function (dry) {
   this.phaseWorldToll();
   this.phaseInfamy();
   this.phaseCompletions();
+  this.phaseLeaseEndings();
   if (!dry) { this.model.commit(); tpFlush_(); this.model.reload('Calculations'); this.world.reloadCalc(); }
   this.phaseStability();
   this.log('Resolution', 'All', 'Turn resolved', 'Turn ' + this.turn + ' resolved', 'Yes', '');
@@ -2021,7 +2268,7 @@ tpResolver_.prototype.phaseDiplomacy = function () {
     self.stats.applied++;
   });
   // TREATY lines: proposals, offers and declines are delivered (Events rows for both parties).
-  this.actions.filter(function (a) { return a.verb === 'TREATY'; }).forEach(function (a) {
+  this.actions.filter(function (a) { return a.verb === 'TREATY' || a.verb === 'LEASE'; }).forEach(function (a) {
     if (self.gate(a) !== 'go') return;
     var approved = a.status === 'Needs ruling';
     var ev = self.reevaluate(a);
@@ -2032,7 +2279,7 @@ tpResolver_.prototype.phaseDiplomacy = function () {
       else self.setStatus(a, 'Not applied', ev.flag);
       return;
     }
-    self.treatyNotice(a, ev.spec);
+    if (ev.spec.type === 'LEASE_END') self.leaseNotice(a, ev.spec); else self.treatyNotice(a, ev.spec);
     self.setStatus(a, 'Applied'); a.spec = ev.spec;
     self.settleRuling(self.decisions['A' + a.actionNo]);
     self.stats.applied++;
@@ -2173,7 +2420,7 @@ tpResolver_.prototype.payDebts = function (n) {
 tpResolver_.prototype.phaseSpending = function () {
   var self = this;
   this.actions.forEach(function (a) {
-    if (a.verb === 'TRANSFER' || a.verb === 'MOVE' || a.verb === 'BUY' || a.verb === 'SELL' || a.verb === 'CANCEL' || a.verb === 'TREATY') return;
+    if (a.verb === 'TRANSFER' || a.verb === 'MOVE' || a.verb === 'BUY' || a.verb === 'SELL' || a.verb === 'CANCEL' || a.verb === 'TREATY' || a.verb === 'LEASE') return;
     if (a.verb === 'COVERT') {
       var d = self.decisions['A' + a.actionNo];
       if (d && d.kind !== 'open') { self.A.set(a.row, 'GM ruling', d.decision || 'Settled'); self.setStatus(a, 'Settled by GM'); self.settleRuling(d); }
@@ -2312,7 +2559,8 @@ tpResolver_.prototype.treatyNotice = function (a, sp) {
     this.event(sp.to, 'Notice', 'Reply from ' + myName, myName + ': ' + said, a.actionNo);
     this.event(a.nation, 'Notice', 'Reply sent to ' + toName, 'Delivered to ' + toName + ': ' + said, a.actionNo);
   } else {
-    this.event(sp.to, 'Treaty proposed', 'Proposal from ' + myName, myName + ' proposes: ' + said + ' Answer in your next orders (TREATY ' + myName + ': accept / decline ...).', a.actionNo);
+    var answer = sp.lease ? '(LEASE ' + sp.lease + ' FROM ' + myName + ': accept, or TREATY ' + myName + ': decline ...)' : '(TREATY ' + myName + ': accept / decline ...)';
+    this.event(sp.to, 'Treaty proposed', 'Proposal from ' + myName, myName + ' proposes: ' + said + ' Answer in your next orders ' + answer + '.', a.actionNo);
     this.event(a.nation, 'Notice', 'Proposal sent to ' + toName, 'Delivered to ' + toName + ': ' + said + ' Answered next turn.', a.actionNo);
   }
   this.log('Diplomacy', a.nation + ', ' + sp.to, sp.mode === 'reply' ? 'Treaty reply' : 'Treaty proposed', myName + ' to ' + toName + ': ' + sp.text, 'No', a.actionNo);
@@ -2680,6 +2928,123 @@ tpResolver_.prototype.phaseSettlement = function () {
   });
 };
 
+// ---------------- Leases (rules, Partnerships) ----------------
+/** Sets a cell if the column exists and is writable; false otherwise (a missing column reads blank). */
+function tpSetIf_(tab, r, header, v) {
+  if (tab.c(header) < 0) return v === '';
+  try { tab.set(r, header, v); return true; } catch (e) { return false; }
+}
+/** Ends a lease. how: 'revert' (sovereignty and administration to the lessor), 'keep' (the lessee holds it
+ *  outright), 'void' (the lease lapses; Owner untouched), 'war' (to the lessor, occupied by the lessee). */
+tpResolver_.prototype.endLease = function (ls, how, treatyStatus, why) {
+  var w = this.world, S = ls.s, L = TURN_CONFIG.LEASE, turn = this.turn, label = w.label(ls.sys), miss = [];
+  if (how === 'revert' || how === 'war') { if (!tpSetIf_(w.systemsTab, S.row, 'Owner', ls.lessor)) miss.push('Owner = ' + ls.lessor); }
+  if (how === 'war' && !tpSetIf_(w.systemsTab, S.row, 'Status', 'Occupied by ' + ls.lessee + ' (T' + turn + ')')) miss.push('Status = Occupied by ' + ls.lessee + ' (T' + turn + ')');
+  [L.lessor, L.treaty, L.payment, L.rent, L.ends].forEach(function (h) { if (!tpSetIf_(w.systemsTab, S.row, h, '')) miss.push(h + ' cleared'); });
+  var tr = w.treatyRow(ls.treaty);
+  if (tr) {
+    if (!tpSetIf_(tr.tab, tr.row, 'Ended (turn)', turn)) miss.push('Treaties ' + ls.treaty + ' Ended (turn) = ' + turn);
+    if (!tpSetIf_(tr.tab, tr.row, 'Status', treatyStatus)) miss.push('Treaties ' + ls.treaty + ' Status = ' + treatyStatus);
+  }
+  var lsr = w.nameOf(ls.lessor), lse = w.nameOf(ls.lessee), ref = ls.treaty ? ' (' + ls.treaty + ')' : '';
+  var after = how === 'revert' ? label + ' returns to ' + lsr + '.' : how === 'keep' ? lse + ' now holds ' + label + ' outright.' :
+    how === 'war' ? label + ' returns to ' + lsr + '\'s sovereignty, occupied by ' + lse + '\'s forces.' : 'The lease is void; ' + label + ' stays with ' + (w.nameOf(String(S.get('Owner') || '')) || 'no one') + '.';
+  this.log('Leases', ls.lessor + ', ' + ls.lessee, 'Lease ended', 'Lease of ' + label + ref + ' ended: ' + why + '. ' + after, 'Yes', '');
+  if (miss.length) this.log('Leases', ls.lessor + ', ' + ls.lessee, 'Lease: write by hand', 'Lease of ' + label + ref + ': the script could not write ' + miss.join('; '), 'No', '');
+  var text = 'The lease of ' + label + ref + ' has ended: ' + why + '. ' + after;
+  [ls.lessor, ls.lessee].forEach(function (id) { var n = w.nation(id); if (n && n.status !== 'Eliminated') this.event(id, 'Treaty ended', 'Lease of ' + label + ' ended', text, ''); }, this);
+};
+
+/** Start of the resolution: war between the parties, an eliminated party, or a world lost to a third power
+ *  ends a lease at once. Calculations is recalculated before Income when anything changed. */
+tpResolver_.prototype.phaseLeaseBreaks = function (dry) {
+  var self = this, w = this.world, changed = false;
+  w.leases().forEach(function (ls) {
+    var lsr = w.nation(ls.lessor), lse = w.nation(ls.lessee);
+    if (ls.lessee && ls.lessee === ls.lessor) { self.endLease(ls, 'void', 'Ended', 'the sovereign already administers it'); changed = true; return; }
+    if (lsr && lsr.status === 'Eliminated') { self.endLease(ls, 'keep', 'Ended: lessor eliminated', w.nameOf(ls.lessor) + ' is eliminated'); changed = true; return; }
+    if (lse && lse.status === 'Eliminated') { self.endLease(ls, 'revert', 'Ended: lessee eliminated', w.nameOf(ls.lessee) + ' is eliminated'); changed = true; return; }
+    var tr = w.treatyRow(ls.treaty);
+    if (!ls.lessee || (tr && tr.parties.length >= 2 && tr.parties.indexOf(ls.lessee) < 0)) {
+      self.endLease(ls, 'void', 'Void', ls.lessee ? w.nameOf(ls.lessee) + ', a third power, has taken the world' : 'the world is no longer held'); changed = true; return;
+    }
+    var war = w.warBetween(ls.lessor, ls.lessee);
+    if (war) { self.endLease(ls, 'war', 'Ended by war', 'war' + (war.id ? ' (' + war.id + ')' : '') + ' between ' + w.nameOf(ls.lessor) + ' and ' + w.nameOf(ls.lessee)); changed = true; }
+  });
+  if (changed && !dry) { this.model.commit(); tpFlush_(); this.model.reload('Calculations'); this.world.reloadCalc(); }
+};
+
+/** After Upkeep: each lease's payment, lessee to lessor, as transfer lines. Unpaid rent and a lease reaching
+ *  its last turn end it at the end of the turn (phaseLeaseEndings). */
+tpResolver_.prototype.phaseLeases = function () {
+  var self = this, w = this.world, turn = this.turn, M = TURN_CONFIG.MARKS;
+  this.leaseEnds = [];
+  var stratCols = TURN_CONFIG.STRATEGIC.filter(function (r) { return w.systemsTab.c(r) >= 0; }), stratText = w.systemsTab.c('Strategic output') >= 0;
+  w.leases().forEach(function (ls) {
+    var tr = w.treatyRow(ls.treaty);
+    if (tr && tr.from !== '' && tpNum_(tr.from) > turn) return;   // not yet in force
+    var S = ls.s, label = w.label(ls.sys), lsrName = w.nameOf(ls.lessor), lseName = w.nameOf(ls.lessee);
+    var head = 'Lease of ' + ls.sys + (ls.treaty ? ' (' + ls.treaty + ')' : '') + ': ';
+    var form = tpLeaseForm_(ls), idle = !!ls.status;
+    function pass(res, amt, what, working) {
+      amt = tpRound2_(amt);
+      if (amt <= 0) return 0;
+      self.ledger('Diplomacy', ls.lessee, res, -amt, head + what + ' to ' + lsrName, working, '');
+      self.ledger('Diplomacy', ls.lessor, res, amt, head + what + ' from ' + lseName, working, '');
+      return amt;
+    }
+    if (!form) self.log('Leases', ls.lessor + ', ' + ls.lessee, 'Lease: no payment', head + 'no payment form on Systems "' + TURN_CONFIG.LEASE.payment + '" (' + TURN_CONFIG.LEASE.forms.join(', ') + '): nothing paid', 'No', '');
+    if (form === 'Rent' || form === 'Rent and extraction') {
+      var rent = tpLeaseRent_(ls.rent);
+      if (!rent) self.log('Leases', ls.lessor + ', ' + ls.lessee, 'Lease: rent unreadable', head + 'rent "' + ls.rent + '" not readable (write e.g. 20 Stellar Marks): not charged this turn', 'No', '');
+      else {
+        var short = Object.keys(rent).filter(function (r) { return w.stock(ls.lessee, r) + 1e-9 < rent[r]; });
+        if (short.length) {
+          self.leaseEnds.push({ ls: ls, how: 'revert', status: 'Ended: rent unpaid', why: 'the rent (' + ls.rent + ') went unpaid: ' + short.map(function (r) { return rent[r] + ' ' + r + ' due, ' + tpRound2_(w.stock(ls.lessee, r)) + ' held'; }).join('; ') });
+        } else Object.keys(rent).forEach(function (r) { pass(r, rent[r], 'rent', 'Rent ' + ls.rent + ' a turn (Systems ' + ls.sys + ')'); });
+      }
+    }
+    var halfStrat = form === 'Shared', allStrat = form === 'Extraction' || form === 'Rent and extraction';
+    if ((halfStrat || allStrat) && !idle) {
+      var out = {};
+      stratCols.forEach(function (r) { var v = tpNum_(S.get(r)); if (v > 0) out[r] = v; });
+      if (stratText) { var p = tpParseStrat_(S.get('Strategic output')); Object.keys(p).forEach(function (r) { if (!(r in out) && p[r] > 0) out[r] = p[r]; }); }
+      if (!stratCols.length && !stratText) self.log('Leases', ls.lessor + ', ' + ls.lessee, 'Lease: write by hand', head + 'Systems has no per-system strategic output columns: ' + (halfStrat ? 'half of ' : '') + label + '\'s strategic output not passed to ' + lsrName, 'No', '');
+      Object.keys(out).forEach(function (r) {
+        var due = halfStrat ? out[r] / 2 : out[r], have = Math.max(0, w.stock(ls.lessee, r)), amt = Math.min(due, have);
+        pass(r, amt, halfStrat ? 'half its ' + r : 'extraction of ' + r, label + ' yields ' + out[r] + ' ' + r + (halfStrat ? '; half = ' + tpRound2_(due) : '; all to the lessor') + (amt + 1e-9 < due ? '; only ' + tpRound2_(have) + ' held' : ''));
+      });
+    }
+    if (form === 'Shared' && !idle) {
+      TURN_CONFIG.RESOURCES.forEach(function (r) {
+        var v = tpNum_(S.get(r)); if (v <= 0) return;
+        var due = v / 2, have = Math.max(0, w.stock(ls.lessee, r)), amt = Math.min(due, have);
+        pass(r, amt, 'half its ' + r, label + ' produces ' + v + ' ' + r + ' (Systems ' + r + ' column); half = ' + tpRound2_(due) + (amt + 1e-9 < due ? '; only ' + tpRound2_(have) + ' held' : ''));
+      });
+    }
+    if (ls.ends && turn >= ls.ends && !self.leaseEnds.some(function (e) { return e.ls.sys === ls.sys; }))
+      self.leaseEnds.push({ ls: ls, how: 'revert', status: 'Expired', why: 'its term ran to the end of Turn ' + ls.ends });
+    else if (ls.ends && turn + 1 === ls.ends) {
+      self.event(ls.lessor, 'Notice', 'Lease of ' + label + ' ends next turn', 'The lease of ' + label + ' to ' + lseName + ' ends at the end of Turn ' + ls.ends + ', and the system returns to us.', '');
+      self.event(ls.lessee, 'Notice', 'Lease of ' + label + ' ends next turn', 'Our lease of ' + label + ' from ' + lsrName + ' ends at the end of Turn ' + ls.ends + ', and the system returns to ' + lsrName + '.', '');
+    }
+  });
+};
+/** End of the turn: leases that expired or went unpaid revert to the lessor. */
+tpResolver_.prototype.phaseLeaseEndings = function () {
+  var self = this;
+  (this.leaseEnds || []).forEach(function (e) { self.endLease(e.ls, e.how, e.status, e.why); });
+};
+/** An approved LEASE END: writes the end turn and tells both parties. */
+tpResolver_.prototype.leaseNotice = function (a, sp) {
+  var w = this.world, S = w.sys(sp.sys), label = w.label(sp.sys), by = w.nameOf(a.nation), ref = sp.treaty ? ' (' + sp.treaty + ')' : '';
+  var ok = S && tpSetIf_(w.systemsTab, S.row, TURN_CONFIG.LEASE.ends, sp.ends) && w.systemsTab.c(TURN_CONFIG.LEASE.ends) >= 0;
+  var text = by + ' has given notice: the lease of ' + label + ref + ' ends at the end of Turn ' + sp.ends + ', and the system returns to ' + w.nameOf(sp.lessor) + '.';
+  this.event(sp.lessor, 'Notice', 'Notice on the lease of ' + label, text, a.actionNo);
+  this.event(sp.lessee, 'Notice', 'Notice on the lease of ' + label, text, a.actionNo);
+  this.log('Diplomacy', sp.lessor + ', ' + sp.lessee, 'Lease notice', text + (ok ? '' : ' GM: write ' + TURN_CONFIG.LEASE.ends + ' = ' + sp.ends + ' on Systems ' + sp.sys + ' by hand.'), 'No', a.actionNo);
+};
+
 // ---------------- Imperial succession ----------------
 tpResolver_.prototype.phaseSuccession = function () {
   var self = this, w = this.world, turn = this.turn, S = this.model.tab('Successions');
@@ -3021,6 +3386,14 @@ tpWorld_.prototype.projectedStock = function (nid) {
       out[best] -= inst;
     }
   });
+  // Lease payments due this turn: paid by the lessee to the lessor after upkeep.
+  this.leases().forEach(function (ls) {
+    if (ls.lessee !== nid && ls.lessor !== nid) return;
+    var tr = self.treatyRow(ls.treaty);
+    if (tr && tr.from !== '' && tpNum_(tr.from) > turn) return;
+    var due = tpLeaseDue_(self, ls), sign = ls.lessee === nid ? -1 : 1;
+    Object.keys(due).forEach(function (r) { out[r] = (out[r] || 0) + sign * due[r]; });
+  });
   Object.keys(out).forEach(function (k) { out[k] = tpRound2_(out[k]); });
   return out;
 };
@@ -3038,6 +3411,38 @@ tpWorld_.prototype.atWar = function (nid) {
     var sides = (String(W.get(r, 'Side A (IDs)')) + ',' + String(W.get(r, 'Side B (IDs)')) + ',' + String(W.get(r, 'Joined later (ID:A or B:turn; ...)'))).split(/[,;:\s]+/);
     return sides.indexOf(nid) >= 0;
   });
+};
+
+tpWorld_.prototype.nameOf = function (id) { var n = this.nation(id); return (n && n.name) || id; };
+/** Leases in force: one per system whose Lessor (sovereign) is filled. */
+tpWorld_.prototype.leases = function () {
+  var self = this;
+  return this.systems.map(function (s) { return tpLeaseOf_(self, s); }).filter(function (x) { return x; });
+};
+/** A Treaties row by its ID, with the parties' IDs, or null. */
+tpWorld_.prototype.treatyRow = function (id) {
+  var T = tpTryTab_(this.model, 'Treaties'), self = this, out = null;
+  if (!T || !id) return null;
+  T.rows().forEach(function (r) {
+    if (out || tpNorm_(T.get(r, 'Treaty ID')) !== tpNorm_(id)) return;
+    out = { tab: T, row: r, parties: self.nationIds([T.get(r, 'Party 1'), T.get(r, 'Party 2'), T.get(r, 'Parties')].join(', ')), from: T.get(r, 'In force from') };
+  });
+  return out;
+};
+/** The war in which a and b stand on opposite sides (Wars: Status Active or Ongoing), or null. */
+tpWorld_.prototype.warBetween = function (a, b) {
+  var W = tpTryTab_(this.model, 'Wars'), hit = null;
+  if (!W) return null;
+  W.rows().forEach(function (r) {
+    if (hit || !/^(?:active|ongoing)$/i.test(String(W.get(r, 'Status') || '').trim())) return;
+    var A = String(W.get(r, 'Side A (IDs)') || '').split(/[,;\s]+/), B = String(W.get(r, 'Side B (IDs)') || '').split(/[,;\s]+/);
+    String(W.get(r, 'Joined later (ID:A or B:turn; ...)') || W.get(r, 'Joined later') || '').split(/\s*;\s*/).forEach(function (j) {
+      var m = j.match(/^\s*([A-Za-z0-9]+)\s*:\s*([AB])\b/i);
+      if (m) (m[2].toUpperCase() === 'A' ? A : B).push(m[1]);
+    });
+    if ((A.indexOf(a) >= 0 && B.indexOf(b) >= 0) || (B.indexOf(a) >= 0 && A.indexOf(b) >= 0)) hit = { row: r, id: String(W.get(r, 'War ID') || '') };
+  });
+  return hit;
 };
 
 // ---------- Contact between nations, lane reach, standing effects ----------
@@ -3299,7 +3704,7 @@ tpWorld_.prototype.disbandDreadnoughts = function (nid, count) {
 tpWorld_.prototype.newSim = function (n, phase, resolver) {
   var self = this, c = this.calc(n.id) || {};
   var stock;
-  if (phase === 'prepare') { stock = this.projectedStock(n.id); stock[TURN_CONFIG.MARKS] = this.stock(n.id, TURN_CONFIG.MARKS); }
+  if (phase === 'prepare') { stock = this.projectedStock(n.id); stock[TURN_CONFIG.MARKS] = tpRound2_(this.stock(n.id, TURN_CONFIG.MARKS) + (stock[TURN_CONFIG.MARKS] || 0)); }
   else {
     stock = {};
     var w = this;

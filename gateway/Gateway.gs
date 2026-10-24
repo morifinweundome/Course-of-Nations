@@ -236,18 +236,21 @@ function gwChart_() {
     return v.slice(1).filter(function (r) { return String(r[0]).trim() !== ''; })
       .map(function (r) { var o = {}; h.forEach(function (k, i) { o[k] = r[i]; }); return o; });
   }
-  var nations = table(GW.NATIONS), byId = {}, slot = {};
-  nations.forEach(function (n, i) { byId[n['Nation ID']] = n['Nation']; slot[n['Nation ID']] = i + 1; });
+  var nations = table(GW.NATIONS), byId = {}, slot = {}, byName = {};
+  nations.forEach(function (n, i) { byId[n['Nation ID']] = n['Nation']; slot[n['Nation ID']] = i + 1; byName[String(n['Nation']).toLowerCase()] = n['Nation ID']; });
+  // A leased system is shown as its lessee's (Owner governs it), with the sovereign in Lessor.
   var head = ['System ID', 'Sector', 'Gateway', 'Core link', 'x', 'y', 'Owner', 'Name', 'Charted', 'Class', 'Type', 'Life',
-              'Native era', 'Deposits', 'Feature', 'Environment', 'Colour', 'Owner ID'];
+              'Native era', 'Deposits', 'Feature', 'Environment', 'Colour', 'Owner ID', 'Lessor', 'Lessor colour'];
   var rows = table('Systems').map(function (s) {
     var charted = String(s['Discovered by'] || '').trim() !== '';
     var oid = String(s['Owner'] || '').trim(), status = String(s['Status'] || '');
     var owner = oid ? (byId[oid] || oid) : (/^Independent/i.test(status) ? 'Independent' : '');
     var base = [s['System ID'], s['Sector'], s['Gateway'], s['Core link'], s['x'], s['y']];
-    if (!charted) return base.concat(['', '', 'No', '', '', '', '', '', '', '', '', '']);
+    if (!charted) return base.concat(['', '', 'No', '', '', '', '', '', '', '', '', '', '', '']);
+    var lraw = String(s['Lessor (sovereign)'] || '').trim(), lid = byId[lraw] ? lraw : (byName[lraw.toLowerCase()] || lraw);
+    var leased = oid && lid && lid !== oid;
     return base.concat([owner, s['Name'], 'Yes', s['Class'], s['Type'], s['Life'], s['Native era'], s['Deposits'], s['Feature'],
-      s['Environment'], oid ? String(slot[oid] || '') : '', oid]);
+      s['Environment'], oid ? String(slot[oid] || '') : '', oid, leased ? (byId[lid] || lid) : '', leased ? String(slot[lid] || '') : '']);
   });
   var lanes = table('Lanes').map(function (l) { return [l['From'], l['To'], l['Kind'] || 'lane']; });
   return { ok: true, chart: [head].concat(rows), lanes: [['From', 'To', 'Kind']].concat(lanes) };

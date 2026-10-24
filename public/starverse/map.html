@@ -166,6 +166,7 @@ body.backdrop .ui,body.backdrop #tip,body.backdrop #menuBtn,body.backdrop #label
     <i style="border-color:#B9D3EA"></i><span>Gateway between Sectors</span>
     <i style="border-color:#E8D7A8;border-top-style:dashed"></i><span>Core link</span>
     <b style="background:#7E92AC"></b><span>Uncharted star</span>
+    <b style="background:transparent;box-shadow:inset 0 0 0 1.5px #E8F0F8"></b><span>Leased: ring in the sovereign's colour</span>
   </div>
 </div>
 
@@ -317,7 +318,7 @@ const haze = new THREE.Group(); scene.add(haze);
 let SYS = [], LANES = [], byId = new Map(), dyn = new THREE.Group(); scene.add(dyn);
 let layers = { lanes: null, territory: null, stars: null, highlight: null, selLanes: null, sel: null };
 const show = { lanes: true, territory: true, labels: true, haze: true };
-const FILTERS = [['natives', 'Natives'], ['deposits', 'Deposits'], ['features', 'Features'], ['gates', 'Gateways']];
+const FILTERS = [['natives', 'Natives'], ['deposits', 'Deposits'], ['features', 'Features'], ['gates', 'Gateways'], ['leased', 'Leased']];
 let activeFilter = null;
 
 const TYPE_TINT = { 'rocky': '#FFE7C2', 'gas giant': '#FFC58F', 'stellar remnant': '#C9DCFF', 'black hole or anomaly': '#C8A2FF' };
@@ -420,6 +421,9 @@ function rebuild() {
   const tg = new THREE.Group();
   const terr = SYS.filter(s => s.owner).map(s => ({ p: [s.pos[0], s.pos[1] - 0.5, s.pos[2]], c: col(s.colour), s: 30, k: 3 }));
   if (terr.length) tg.add(pointsFrom(terr, mat(0.07)));
+  // leased systems: a ring in the sovereign's colour around a star governed by the lessee
+  const rings = SYS.filter(s => s.owner && s.lessor).map(s => ({ p: s.pos, c: col(s.lessorColour), s: 12, k: 4 }));
+  if (rings.length) tg.add(pointsFrom(rings, mat(0.85)));
   const plane = territoryPlane(); if (plane) tg.add(plane);
   layers.territory = tg; tg.visible = show.territory; dyn.add(tg);
   // stars
@@ -443,6 +447,7 @@ function matches(s, f) {
     case 'features': return !!s.feature;
     case 'uncharted': return MODE === 'gm' ? !s.discovered : !s.charted;
     case 'gates': return !!(s.gateway || s.corelink);
+    case 'leased': return !!(s.owner && s.lessor);
   }
 }
 function applyFilter() {
@@ -599,6 +604,7 @@ function card(s) {
   if (s.sector === 'Core') tags.push('<span class="tag g">The Core</span>');
   if (s.gateway) tags.push('<span class="tag">Gateway</span>');
   if (s.corelink) tags.push('<span class="tag">Core link</span>');
+  if (s.owner && s.lessor) tags.push(`<span class="tag" title="${esc(s.owner)} governs it in ${esc(s.lessor)}'s name; ${esc(s.lessor)} keeps sovereignty">Leased</span>`);
     const row = (k, v) => v ? `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>` : '';
   let body;
   if (s.charted) {
@@ -610,7 +616,7 @@ function card(s) {
   $('#card').innerHTML = `<button class="x" aria-label="Close">×</button>
     <div class="id">${esc(s.id)} · ${s.sector === 'Core' ? 'THE CORE' : 'SECTOR ' + esc(s.sector)}</div>
     <h2>${esc(s.name || (s.charted ? 'Unnamed system' : 'Uncharted system'))}</h2>
-    <div class="own">${s.owner ? `<span class="sw" style="background:${s.colour};color:${s.colour}"></span>Held by ${esc(s.owner)}` : '<span style="color:var(--muted)">Unclaimed</span>'}</div>
+    <div class="own">${s.owner ? `<span class="sw" style="background:${s.colour};color:${s.colour}"></span>Held by ${esc(s.owner)}${s.lessor ? ` · leased from <span style="color:${s.lessorColour}">${esc(s.lessor)}</span>` : ''}` : '<span style="color:var(--muted)">Unclaimed</span>'}</div>
     ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
     ${body}${worksSection(s)}${worldsSection(s)}${gm}
     <div class="sec"><h4>Hyperlanes · ${s.adj.length}</h4>${s.adj.map(a => { const t = byId.get(a); return `<button class="jump" data-id="${esc(a)}">${t.name ? esc(t.name) + ' · ' : ''}${esc(a)}</button>`; }).join('')}</div>`;
@@ -672,7 +678,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   if ((s && s.id) !== hoverId) { hoverId = s ? s.id : null; if (s) window.SISound?.fx('hover'); }
   if (!s) { tip.style.display = 'none'; renderer.domElement.style.cursor = ''; return; }
   renderer.domElement.style.cursor = 'pointer';
-  tip.innerHTML = `${esc(s.name || s.id)}${s.owner ? ` · <span style="color:${s.colour}">${esc(s.owner)}</span>` : ''}${s.charted && s.class ? ` · ${esc(s.class)}` : ''}`;
+  tip.innerHTML = `${esc(s.name || s.id)}${s.owner ? ` · <span style="color:${s.colour}">${esc(s.owner)}</span>` : ''}${s.owner && s.lessor ? ` · leased from <span style="color:${s.lessorColour}">${esc(s.lessor)}</span>` : ''}${s.charted && s.class ? ` · ${esc(s.class)}` : ''}`;
   tip.style.display = 'block'; tip.style.left = e.clientX + 14 + 'px'; tip.style.top = e.clientY + 12 + 'px';
 });
 addEventListener('keydown', e => { if (e.key === 'Escape') closeCard(); });
@@ -763,7 +769,8 @@ async function playerFeed() {
       id: o['System ID'], sector: o['Sector'], gateway: yes(o['Gateway']), corelink: yes(o['Core link']),
       x: parseFloat(o['x']), y: parseFloat(o['y']), owner: o['Owner'], ownerId: o['Owner ID'], name: o['Name'], charted: o['Charted'] === 'Yes',
       class: o['Class'], type: o['Type'], life: o['Life'], era: o['Native era'], deposits: o['Deposits'], feature: o['Feature'], env: o['Environment'],
-      colour: o['Owner'] ? nationColour(o['Colour'], o['Owner']) : null
+      colour: o['Owner'] ? nationColour(o['Colour'], o['Owner']) : null,
+      lessor: o['Lessor'] || '', lessorColour: o['Lessor'] ? nationColour(o['Lessor colour'], o['Lessor']) : null
     }));
     const lanes = objects(parseCSV(b)).map(o => ({ from: o['From'], to: o['To'], kind: o['Kind'] || 'lane' }));
     if (!sys.length) throw 'empty';

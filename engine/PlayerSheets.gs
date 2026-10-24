@@ -189,6 +189,9 @@ function pfRecord_(W, n) {
   var income = { Industry: c.num('Net Industry'), Energy: c.num('Net Energy'), Research: c.num('Net Research'), Influence: c.num('Net Influence') };
   PF_STRAT.forEach(function (k) { income[k] = c.num(k); });
   var upkeep = { Energy: c.num('Upkeep Energy'), Influence: c.num('Upkeep Influence'), 'Volatile isotopes': c.num('Upkeep Volatile isotopes') };
+  // leases: what this nation pays as lessee (upkeep) and receives as lessor (income) each turn
+  var lf = pfLeaseFlow_(W, id);
+  Object.keys(lf).forEach(function (k) { if (lf[k] > 0) income[k] = (income[k] || 0) + lf[k]; else upkeep[k] = (upkeep[k] || 0) - lf[k]; });
   var stock = [['Resource', 'Kind', 'Stockpile', 'Income', 'Upkeep', 'Committed', 'Net this turn', 'Projected']];
   PF_MAIN.concat(PF_STRAT).forEach(function (k) {
     var s = n.num(k), inc = income[k] || 0, up = upkeep[k] || 0, com = committed[k] || 0;
@@ -236,7 +239,8 @@ function pfRecord_(W, n) {
 
   // systems held
   var sys = [['System ID', 'Name', 'Sector', 'Class', 'Environment', 'Designation', 'Development', 'Development cap', 'Buildings',
-    'Slots', 'Slots used', 'Condition', 'Strain', 'Population (bn)', 'Carrying capacity (bn)', 'Industry', 'Energy', 'Research', 'Influence', 'Growth due (bn)', 'Overcrowded', 'Orbital slots', 'Orbital used']];
+    'Slots', 'Slots used', 'Condition', 'Strain', 'Population (bn)', 'Carrying capacity (bn)', 'Industry', 'Energy', 'Research', 'Influence', 'Growth due (bn)', 'Overcrowded', 'Orbital slots', 'Orbital used',
+    'Leased from', 'Lease']];
   var orbital = ['Habitat Station'];
   W.unlocks.forEach(function (u) { if (/orbital/i.test(u.get('Takes a slot')) && orbital.indexOf(u.get('Building')) < 0) orbital.push(u.get('Building')); });
   W.systems.filter(function (s) { return s.get('Owner') === id; }).forEach(function (s) {
@@ -245,7 +249,16 @@ function pfRecord_(W, n) {
       s.get('Condition'), s.get('Strain'), s.get('Population (bn)'), s.get('Carrying capacity (bn)'),
       s.get('Industry'), s.get('Energy'), s.get('Research'), s.get('Influence'), s.get('Growth due (bn)'), s.get('Overcrowded'),
       1 + (s.num('Development') >= 4 ? 1 : 0),
-      String(s.get('Buildings')).split(/\s*,\s*/).filter(function (b) { return orbital.indexOf(b.replace(/\s*\(.*\)\s*$/, '')) >= 0; }).length]);
+      String(s.get('Buildings')).split(/\s*,\s*/).filter(function (b) { return orbital.indexOf(b.replace(/\s*\(.*\)\s*$/, '')) >= 0; }).length]
+      .concat(pfLeaseOf_(W, s) ? [pfNatName_(W, pfLeaseOf_(W, s).lessor), pfLeaseText_(W, pfLeaseOf_(W, s), 'in')] : ['', '']));
+  });
+
+  // systems this nation has leased out: it keeps sovereignty; the lessee governs them
+  var leasedOut = [['System ID', 'Name', 'Lessee', 'Payment', 'Rent per turn', 'Ends (turn)', 'Treaty', 'Lease']];
+  W.systems.forEach(function (s) {
+    var ls = pfLeaseOf_(W, s);
+    if (!ls || ls.lessor !== id) return;
+    leasedOut.push([s.get('System ID'), s.get('Name'), pfNatName_(W, ls.lessee), ls.payment, ls.rent, ls.ends || 'Indefinite', ls.treaty, pfLeaseText_(W, ls, 'out')]);
   });
 
   // worlds (same layout the star map's private link reads)
@@ -293,7 +306,53 @@ function pfRecord_(W, n) {
     orders.push([a.get('Posted text'), st === 'Needs ruling' ? 'Awaiting the GM' : st, a.get('Industry'), a.get('Energy'), a.get('Research'), a.get('Influence'), a.get('Strategic')]);
   });
 
-  return { Sheet: sheet, Stockpiles: stock, Systems: sys, Worlds: worlds, Forces: forces, Works: works, Fiscal: fiscal, Statement: statement, Orders: orders };
+  return { Sheet: sheet, Stockpiles: stock, Systems: sys, 'Leased out': leasedOut, Worlds: worlds, Forces: forces, Works: works, Fiscal: fiscal, Statement: statement, Orders: orders };
+}
+
+/* ------------------------------------------------------------------ leases */
+// Systems "Owner" is the nation that governs a system (the lessee); "Lessor (sovereign)" the sovereign.
+// Any lease column may be missing: it reads blank.
+
+function pfNatId_(W, v) {
+  v = String(v || '').trim(); if (!v) return '';
+  var n = W.nations.filter(function (x) { return x.id === v || x.get('Nation').toLowerCase() === v.toLowerCase(); })[0];
+  return n ? n.id : v;
+}
+function pfNatName_(W, id) { var n = W.nations.filter(function (x) { return x.id === id; })[0]; return n ? n.get('Nation') : id; }
+function pfLeaseOf_(W, s) {
+  var lessor = pfNatId_(W, s.get('Lessor (sovereign)'));
+  if (!lessor) return null;
+  return { lessor: lessor, lessee: s.get('Owner'), treaty: s.get('Lease treaty'), payment: s.get('Lease payment'), rent: s.get('Lease rent per turn'),
+    ends: s.get('Lease ends (turn)'), status: s.get('Status'), s: s };
+}
+/** "Leased from Vysos, Rent (20 Stellar Marks a turn), until Turn 45" / "Leased to Kharos, Shared, indefinite". */
+function pfLeaseText_(W, ls, dir) {
+  var who = dir === 'in' ? 'Leased from ' + pfNatName_(W, ls.lessor) : 'Leased to ' + pfNatName_(W, ls.lessee);
+  var pay = ls.payment || (ls.rent ? 'Rent' : '');
+  if (pay && ls.rent && /rent/i.test(pay)) pay += ' (' + ls.rent + ' a turn)';
+  return who + (pay ? ', ' + pay : '') + ', ' + (ls.ends ? 'until Turn ' + ls.ends : 'indefinite');
+}
+/** Per-turn lease payments for a nation: negative = paid as lessee, positive = received as lessor (as the turn script pays them). */
+function pfLeaseFlow_(W, id) {
+  var out = {};
+  function add(k, v) { if (v) out[k] = (out[k] || 0) + v; }
+  W.systems.forEach(function (s) {
+    var ls = pfLeaseOf_(W, s);
+    if (!ls || (ls.lessee !== id && ls.lessor !== id) || ls.lessee === ls.lessor) return;
+    var sign = ls.lessee === id ? -1 : 1, p = String(ls.payment || (ls.rent ? 'Rent' : '')).toLowerCase();
+    var shared = /shar|50\s*\/\s*50|split/.test(p), extract = /extract/.test(p), rent = /rent|fee/.test(p);
+    if (rent) String(ls.rent).replace(/\b(?:a|per|each|every)\s+turn\b/ig, '').split(/\s*(?:,|;|\+|\band\b)\s*/i).forEach(function (part) {
+      var m = part.trim().match(/^(\d+(?:\.\d+)?)\s*(.+)$/); if (!m) return;
+      var nm = m[2].trim().toLowerCase(), k = /^(?:stellar )?marks?$|^sm$/.test(nm) ? PF_MARKS :
+        PF_MAIN.concat(PF_STRAT).filter(function (x) { return x.toLowerCase() === nm || x.toLowerCase().replace(/s$/, '') === nm.replace(/s$/, ''); })[0];
+      if (k) add(k, sign * parseFloat(m[1]));
+    });
+    if (ls.status || !(shared || extract)) return;
+    PF_STRAT.forEach(function (k) { add(k, sign * (shared ? 0.5 : 1) * s.num(k)); });
+    if (shared) PF_MAIN.forEach(function (k) { add(k, sign * 0.5 * s.num(k)); });
+  });
+  W.leaseFlow = W.leaseFlow || {}; W.leaseFlow[id] = out;
+  return out;
 }
 
 /* ------------------------------------------------------------------ writing a record */
@@ -620,5 +679,6 @@ function pfExchange_(W, n, rec) {
   rec['Exchange orders'] = O;
   var marks = 0;
   W.ledger.forEach(function (l) { if (l.get('Nation') === id && l.get('Resource') === PF_MARKS) marks += l.num('Amount'); });
-  rec.Stockpiles.push([PF_MARKS, 'Treasury', pfRound_(marks), 0, 0, 0, 0, pfRound_(marks)]);
+  var lm = (W.leaseFlow && W.leaseFlow[id] && W.leaseFlow[id][PF_MARKS]) || 0;   // lease rent in Marks, paid or received each turn
+  rec.Stockpiles.push([PF_MARKS, 'Treasury', pfRound_(marks), lm > 0 ? pfRound_(lm) : 0, lm < 0 ? pfRound_(-lm) : 0, 0, pfRound_(lm), pfRound_(marks + lm)]);
 }
